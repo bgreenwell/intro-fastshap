@@ -1,6 +1,6 @@
 ---
 title: "Scalable Shapley Explanations in R"
-subtitle: "An introduction to the fastshap package"
+subtitle: "An introduction to the fastshap package\n https://bgreenwell.github.io/intro-fastshap/slides.html"
 author: "Brandon M. Greenwell"
 institute: "84.51/University of Cincinnati"
 date: "`r Sys.Date()`"
