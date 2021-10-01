@@ -1,0 +1,1 @@
+{"frames":[{"func":"explain(ifo, X = X, newdata = max.x, pred_wrapper = pfun, adjust = TRUE, \n    nsim = 1000)","file":"","line_number":0,"end_line_number":0,"character_number":0,"end_character_number":0}],"message":"Error in UseMethod(\"explain\") : \n  no applicable method for 'explain' applied to an object of class \"isolation_forest\"\n"}

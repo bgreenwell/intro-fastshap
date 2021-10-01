@@ -1,0 +1,1694 @@
+---
+title: "Interpretable Machine Learning"
+subtitle: "A Practical Introduction with R (and some Python)"
+author: "Brandon M. Greenwell<br/><br/>Email: brandon.greenwell@8451.com<br/><br/>Link to materials: https://github.8451.com/b780620/iml-intro"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    mathjax: "https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_HTMLorMML"
+    css: ["default", "default-fonts", "custom.css"]
+    chakra: libs/remark-latest.min.js
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+class: middle, center
+
+```{r setup, include = FALSE}
+# Set global knitr chunk options
+knitr::opts_chunk$set(
+  # cache = TRUE,
+  crayon.enabled = TRUE,
+  dev = "svg",     
+  echo = TRUE,
+  error = FALSE,
+  fig.asp = 0.618,
+  fig.width = 6,
+  fig.retina = 3,  
+  out.width = "90%",
+  message = FALSE,
+  warning = FALSE
+)
+
+# Set global R options
+options(
+  width = 9999,
+  servr.daemon = TRUE
+)
+
+# Biblioography
+library(RefManageR)
+BibOptions(check.entries = FALSE,
+           bib.style = "authoryear",
+           cite.style = "alphabetic",
+           style = "markdown",
+           hyperlink = FALSE,
+           dashed = FALSE)
+bib <- ReadBib("./general.bib", check = FALSE)
+```
+
+<img src="images/strong-opinions.jpg" style="width: 50%" />
+
+
+---
+class: middle, center
+
+# Where to get started
+.pull-left[
+
+<img src="images/book-iml.jpg" style="width: 80%" />
+
+[Free online edition](https://christophm.github.io/book/)
+
+]
+
+.pull-right[
+
+<img src="images/book-h2o.jpg" style="width: 70%" />
+
+[Free online edition](https://www.h2o.ai/wp-content/uploads/2019/08/An-Introduction-to-Machine-Learning-Interpretability-Second-Edition.pdf)
+
+]
+
+
+---
+
+# What we're not covering
+
+* Machine learning basics
+
+  - This deck is focused on illustrating IML techniques, not on the proper way to train and validate machine learning models; hence, we do not bother with any data splitting or hyperparameter tuning, etc.
+
+* Mathematical details (.dodgerblue[though happy to discuss and/or point to useful materials])
+
+* *Monotonicity constraints* `r set.seed(2); emo::ji("graph")`
+
+* Interpretability in the **Data.dodgerblue[Robot]** platform
+
+* Causality
+
+  - IML is more about .magenta[hypothesis generation] and **does not** convey any *cause and effect* message
+  
+  - This is an area of active research
+  
+  - [Causal Interpretations of Black-Box Models](https://web.stanford.edu/~hastie/Papers/pdp_zhao_final.pdf) is a good place to start
+
+
+---
+
+# What does "interpretable" mean?
+
+* Although "interpretability" is difficult to formally define in the context of machine learning (ML), in the context of this talk, we define "interpretable" as the
+
+<br/>
+
+>.font175.dodgerblue["...ability to explain or to present in understandable terms to a human."]
+>
+> `r Citet(bib, "doshivelez-2017-rigorous")`
+
+<br/>
+
+* In the context of ML, this usually means:
+
+  - .purple[**Which features are the most "important"?**]
+  
+  - .purple[**How does each feature (or subset of features) marginally effect the model's predictions?**]
+  
+  - .purple[**How do the feature values contribute to a particular prediction?**]
+
+
+---
+
+# Why should you care?
+
+.pull-left[
+* Machine learning is becoming more commonplace (especially with the recent rise in *automated machine learning*)
+
+* We often spend weeks, maybe even months, training and deploying these models
+
+  - A single ML metric (like accuracy) provides an incomplete description of most real-world tasks
+
+* Increased **transparency** (.red[why did a model make a certain prediction?])
+
+* .purple[Fairness], privacy, reliability, ~~causality~~, and **trust**
+]
+
+.pull-right[
+<img src="images/netflix-error.png" style="width: 80%" />
+]
+
+
+---
+class: middle, center
+
+# The typical trade-off
+
+<img src="images/interpretability-tradeoff.png" style="width: 100%" />
+
+**Source:** https://www.youtube.com/watch?v=ngOBhhINWb8
+
+
+---
+class: middle, center
+
+# Some existing open source solutions
+
+![](images/existing-solutions.png)
+
+.purple[Plenty of great open source solutions to choose from!]
+
+---
+class: middle, center
+
+# Some existing open source solutions
+
+![](images/my-solutions.png)
+
+.purple[We'll primarily be discussing three of them...]
+
+
+---
+
+# Agenda
+
+.left-column[
+<img src="images/logos-vertical.png" style="width: 110%" />
+]
+
+.right-column[
+
+* .tomato[**Feature importance**]
+
+  - Permutation-based feature importance
+  
+  - Shapley-based feature importance
+
+* .tomato[**Feature effects**] 
+
+  - Partial dependence plots
+  
+  - ICE curves
+  
+  - Shapley-based dependence plots
+
+* .tomato[**Explaining individual predictions**]
+
+  - Shapley explanations
+  
+  - ICE-based explanations (similar to **Data.dodgerblue[Robot]**'s prediction explanations)
+  
+]
+
+
+---
+
+# Setup (internal)
+
+```{r internal-packages, eval=FALSE}
+# Need remotes to install packages from GitHub
+if (!("remotes" %in% installed.packages()[, "Package"])) {
+  install.packages("remotes")
+}
+
+# Internal package providing various DataRobot EXtensions (to the R interface)
+remotes::install_github(  # Python version also exists
+  repo = "DataRobot/drex",
+  host = "github.8451.com/api/v3", 
+  auth_token = Sys.getenv("GITHUB_ACCESS_TOKEN"),
+  upgrade = "never",
+  force = TRUE
+)
+
+# Internal package for flexibly, and easily  generating ICE data
+remotes::install_github(  
+  repo = "DataRobot/icecube",  # will end up moving to another location!  #<<
+  host = "github.8451.com/api/v3", 
+  auth_token = Sys.getenv("GITHUB_ACCESS_TOKEN"),
+  upgrade = "never",
+  force = TRUE
+)
+```
+
+
+---
+
+# Setup (CRAN)
+
+```{r external-packages}
+# Install required packages
+pkgs <- c(
+  "data.table", "datarobot", "dplyr", "ggplot2", "gridExtra", "ranger", "sparklyr", "tibble", "tidyr",
+  "DALEX", "iBreakDown", "ingredients", "iml",  # for comparison and benchmarks
+  "vip", "pdp", "fastshap"                      # core IML packages (for this talk)
+)
+install.packages(setdiff(pkgs, installed.packages()[, "Package"]))
+
+# Load required packages
+library(datarobot)  # for official datarobot interface
+library(dplyr)      # for data wrangling
+library(fastshap)   # for (relatively) fast approximate Shapley values
+library(ggplot2)    # for awesome plotting
+library(icecube)    # for `gen_ice_data()` function (because I'm lazy...)
+library(pdp)        # for partial dependence plots (PDPd) and ICE curves
+library(sparklyr)   # for interfacing with Spark
+library(vip)        # for variable importance plots (VIPs)
+```
+
+
+---
+
+# Example data sets
+
+.font150[
+
+* [Titanic: Machine Learning from Disaster](https://www.kaggle.com/c/titanic) ([Kaggle](https://www.kaggle.com/)) 
+
+  - .dodgerblue[Type:] binary classification
+  - .dodgerblue[Number of features:] 7
+  - .dodgerblue[Number of rows:] 714
+
+* [Default of credit card clients](https://archive.ics.uci.edu/ml/datasets/default+of+credit+card+clients) ([UCI MLR](https://archive.ics.uci.edu/ml/index.php))
+
+  - .dodgerblue[Type:] binary classification
+  - .dodgerblue[Number of features:] 24
+  - .dodgerblue[Number of rows:] 30k
+
+]
+
+
+---
+
+# Example: Titanic
+
+.middle[
+[The competition](https://www.kaggle.com/c/titanic) ask you to build a predictive model that answers the question: ".blue[**what sorts of people were more likely to survive?**]"
+]
+
+.scrollable[
+
+```{r titanic-load}
+# Read in the data and clean it up a bit
+titanic <- read.csv("data/titanic/train.csv")
+features <- c(
+  "Survived",  # passenger survival indicator
+  "Pclass",    # passenger class
+  "Sex",       # gender
+  "Age",       # age
+  "SibSp",     # number of siblings/spouses aboard
+  "Parch",     # number of parents/children aboard
+  "Fare",      # passenger fare
+  "Embarked"   # port of embarkation
+)
+titanic <- titanic[, features]
+titanic$Survived <- as.factor(titanic$Survived)
+titanic$Pclass <- as.factor(titanic$Pclass)
+titanic <- na.omit(titanic)
+```
+
+]
+
+
+---
+
+# Example: Titanic
+
+.scrollable[
+
+```{r titanic-setup}
+head(titanic, n = 15)
+```
+
+]
+
+
+---
+
+# Example: Titanic
+
+.scrollable[
+
+```{r titanic-rf}
+# Fit a (default) random forest
+set.seed(921)  # for reproducibility
+(titanic_rfo <- ranger::ranger(Survived ~ ., data = titanic, 
+                               probability = TRUE,        #<<
+                               importance = "impurity"))  #<<
+```
+
+]
+
+
+---
+
+# Example: credit card default (Spark)
+
+.scrollable[
+
+```{r connect-to-spark}
+# Establish (local) connection to Spark
+sc <- spark_connect("local")
+
+# Read in the data
+credit <- data.table::fread("data/credit.csv")  #<<
+head(credit_tbl <- spark_read_csv(sc, path = "data/credit.csv"), n = 8)
+
+# Fit a (default) random forest
+credit_rfo <- ml_random_forest(credit_tbl, formula = default ~ ., 
+                               type = "classification", seed = 1346)
+```
+
+]
+
+
+---
+
+# Example: credit card default (**Data.dodgerblue[Robot]**)
+
+```{r credit-datarobot-setup-hide, echo=FALSE, eval=FALSE}
+# Connect to DataRobot
+ConnectToDataRobot()
+
+# Grab project (or create a new one)
+projects <- ListProjects()
+pid <- projects$projectId[projects$projectName == "credit-card-default"]
+```
+
+
+.scrollable[
+```{r credit-datarobot-setup, eval=FALSE}
+# Connect to DataRobot
+ConnectToDataRobot()
+
+# Grab project (or create a new one)
+projects <- ListProjects()
+pid <- projects$projectId[projects$projectName == "credit-card-default"]
+if (length(pid) == 0) {
+  
+  # Initialiize project
+  project <- SetupProject(
+    dataSource = "data/credit.csv",
+    projectName = "credit-card-default"
+  )
+  
+  # Run autopilot
+  SetTarget(
+    project = project,
+    target = "default",
+    metric = "LogLoss",
+    mode = "auto",
+    seed = 1851,
+    targetType = "Binary"
+  )
+  WaitForAutopilot(project)
+  
+}
+
+# Grab first codegen-enabled XGBoost model
+model <- project %>%
+  ListModels() %>%
+  # drex::list_codegen_models() %>%  # requires internal drex package  #<<
+  as.data.frame() %>%
+  filter(grepl("eXtreme", x = modelType)) %>%
+  slice(1L) %>%
+  pull(modelId) %>%
+  GetModel(project, .)
+
+# Create a directory to hold the JAR file(s)
+if (!dir.exists("jars")) {
+  dir.create("jars")
+}
+
+# Download scoring code
+DownloadScoringCode(
+  project = model$projectId,
+  modelId = model$modelId,
+  fileName = paste0("jars/", model$modelId, ".jar")
+)
+```
+
+]
+
+
+---
+class: middle, center
+
+# Variable importance plots (VIPs)
+
+<img src="images/logo-vip.png" style="width: 50%" />
+
+
+---
+
+# Type of variable importance
+
+Generally two types...
+
+.pull-left[
+## Model-specific ([vip](https://github.com/koalaverse/vip) `r emo::ji("check")`)
+
+* Impurity-based measure for decision trees
+
+* *t*- or *z*-statistic in (generalized) linear models
+
+* The Garson and Olden algorithms for neural networks
+
+* Accumulated decrease in residual sum of squares during the backward pass in *multivariate adaptive regression splines* (MARS)
+
+* Etc.
+]
+
+--
+
+.pull-right[
+## Model-agnostic ([vip](https://github.com/koalaverse/vip) `r emo::ji("check")`)
+
+* Permutation-based importance (.blue[most common]) 
+
+* Variance-based importance
+
+  - A simple, but effective approach; see [our paper](https://github.com/koalaverse/vip/blob/master/rjournal/RJwrapper.pdf) (to appear in [The R Journal](https://journal.r-project.org/))
+
+  - Special case of the *feature importance ranking measure* (FIRM) `r Citep(bib, "zien-2009-feature")`
+
+* Shapley-based importance
+]
+
+
+---
+
+# Permutation-based importance
+
+Permutation importance is .tomato[any measure of how much *worst* a model's predictions are after randomly permuting a particular feature column].
+
+<img src="images/permutation-importance-01.png" style="width: 90%" />
+
+--
+
+<img src="images/permutation-importance-02.png" style="width: 90%" />
+
+
+---
+
+# Why permutation-based importance?
+
+.font120[
+
+* *Model-agnostic* (.blue[can be applied to any algorithm])
+
+  - Makes it easier to compare across models (`r emo::ji("apple")` vs. `r emo::ji("apple")`)
+
+* Easily parallelized
+
+* Readily available ([scikit-learn](https://scikit-learn.org/stable/modules/permutation_importance.html), **Data.dodgerblue[Robot]**, [vip](https://cran.r-project.org/package=vip), etc.)
+
+  - There are several implementations in R, including [vip](https://cran.r-project.org/package=vip), [iml](https://cran.r-project.org/package=iml), [ingredients](https://cran.r-project.org/package=ingredients), and [mmpf](https://cran.r-project.org/package=mmpf)
+
+  - The implementations in [scikit-learn](https://scikit-learn.org/stable/modules/permutation_importance.html), [vip](https://cran.r-project.org/package=vip), and [iml](https://cran.r-project.org/package=iml) are parallelized `r emo::ji("sunglasses")`
+
+]
+
+
+---
+class: middle, center
+
+# Why the vip `r emo::ji("package")`?
+
+![](images/vip-drake.png)
+
+
+---
+class: middle, center
+
+# Why the vip `r emo::ji("package")`?
+
+Based on **100 repeats** of permutation importance using a random forest fit to a training set with **10k rows** and **10 features**
+
+<img src="images/benchmark-vip.png" style="width: 90%" />
+
+
+---
+
+# Example: Titanic
+
+```{r titanic-vip-code, eval=FALSE}
+# Create a prediction wrapper
+pfun <- function(object, newdata) {
+  predict(object, data = newdata)$predictions[, "1"]
+}
+
+# Compute model-specific variable importance
+p1 <- vip(titanic_rfo, include_type = TRUE)  # model-specific  #<<
+
+# Compute permutation importance
+set.seed(1440)  # for reproducibility                       #<<
+p2 <- vip(titanic_rfo, method = "permute", metric = "auc",  #<<
+          pred_wrapper = pfun, target = "Survived",         #<<
+          reference_class = "1", nsim = 10,                 #<<
+          geom = "box", include_type = TRUE)                #<<
+
+# Display VIPs side by side
+grid.arrange(p1, p2, nrow = 1)
+```
+
+
+---
+
+# Example: Titanic
+
+```{r titanic-vip-plot, echo=FALSE}
+# Create a prediction wrapper
+pfun <- function(object, newdata) {
+  predict(object, data = newdata)$predictions[, "1"]
+}
+
+# Compute model-specific variable importance
+p1 <- vip(titanic_rfo, include_type = TRUE)  # model-specific  #<<
+
+# Compute permutation importance
+set.seed(1440)  # for reproducibility
+p2 <- vip(titanic_rfo, method = "permute", metric = "auc",  #<<
+          pred_wrapper = pfun, target = "Survived",         #<<
+          reference_class = "1", nsim = 10,                 #<<
+          geom = "box", include_type = TRUE)                #<<
+
+# Display VIPs side by side
+grid.arrange(p1, p2, nrow = 1)
+```
+
+
+---
+
+# Example: credit card default (Spark)
+
+Also works with [Spark MLlib](https://spark.rstudio.com/mlib/), [h2o](https://cran.r-project.org/package=h2o), etc.
+
+```{r credit-vip}
+# Extract model-specific VI
+vip(credit_rfo, include_type = TRUE)
+```
+
+
+---
+
+# Permutation-based importance
+
+.pull-left[
+## Drawbacks
+
+* Should you use the train or test data set for permuting?
+
+* Requires access to the true target values
+
+* Results are random (due to random shuffling of columns)
+
+* Correlated features lead to *extrapolating* `r emo::ji("scream")`
+
+]
+
+.pull-right[
+## Alternatives
+
+* *Leave-one-variable-out* (LOVO) importance
+
+* Conditional variable importance `r emo::ji("tree")``r emo::ji("tree")``r emo::ji("tree")``r emo::ji("tree")`
+
+* Dropped variable importance
+
+* Permute-and-relearn importance
+
+* Condition-and-relearn importance
+
+]
+
+.center.font150[[Please Stop Permuting Features: An Explanation and Alternatives](https://arxiv.org/abs/1905.03151)]
+
+
+---
+class: middle, center
+
+# Partial dependence plots (PDPs)
+
+<img src="images/logo-pdp.png" style="width: 50%" />
+
+
+---
+
+# PDPs in a nutshell `r set.seed(1); emo::ji("nut")`
+
+* A plot showing the .tomato[*marginal* (or average) effect] of a small subset of features (usually one or two) .tomato[on the predicted outcome] `r set.seed(2); emo::ji("graph")`
+
+  - The PDP for the $j$-th feature $x_j$ .blue[shows how the average prediction changes as a function of $x_j$] (the average is taken across the training set, or representative sample thereof)
+
+* Can help determine if the modeled relationship is linear, nonlinear, monotonic, etc.
+
+* .red[Can be misleading in the presence of strong *interaction effects*] `r emo::ji("scream")`
+
+  - .green[*Individual conditional expectation* (ICE) curves], a slight modification to PDPs, don't share this disadvantage 
+  
+  - **think of ICE curves as a marginal effect plot for individual observations**, one curve for each row in the training data
+
+
+---
+
+# How are PDPs constructed (algorithm view `r set.seed(4); emo::ji("vomit")`)?
+
+Constructing a PDP in practice is rather straightforward. To simplify, let $\boldsymbol{z}_s = x_1$ be the predictor variable of interest with unique values $\left\{x_{11}, x_{12}, \dots, x_{1k}\right\}$. The partial dependence of the response on $x_1$ can be constructed as follows:
+
+  * For $i \in \left\{1, 2, \dots, k\right\}$:
+
+    1. Copy the training data and replace the original values of $x_1$ with the constant $x_{1i}$.
+    
+    2. Compute the vector of predicted values from the modified copy of the training data.
+    
+    3. Compute the average prediction to obtain $\bar{f}_1\left(x_{1i}\right)$.
+  
+  * Plot the pairs $\left\{x_{1i}, \bar{f}_1\left(x_{1i}\right)\right\}$ for $i = 1, 2, \dotsc, k$.
+
+.font150.center[.tomato[Rather straightforward to implement actually!] `r set.seed(1); emo::ji("computer")`]
+
+
+---
+
+# What does that really mean?
+
+<img src="images/pdp-01.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-02.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-03.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-04.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-05.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-06.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-07.png" style="width: 110%" />
+
+
+---
+
+# Brute force approach
+
+<img src="images/pdp-07.png" style="width: 110%" />
+
+For ICE curves we would just skip the last step of averaging the predictions together
+
+
+---
+  
+# Example: Titanic (PDP)
+  
+```{r titanic-pdp-top-3, fig.width=9, fig.asp=1/3}
+# PDPs for three features
+features <- c("Age", "Sex", "Pclass")
+pdps <- lapply(features, FUN = function(x) {
+  partial(titanic_rfo, pred.var = x, plot = TRUE, plot.engine = "ggplot2",  #<<
+          which.class = "1", prob = TRUE, rug = TRUE)                       #<<
+})
+gridExtra::grid.arrange(grobs = pdps, nrow = 1)  # arrange plots in a grid
+```
+
+
+---
+  
+# Example: Titanic (ICE curves)
+  
+```{r titanic-ice-top-3, fig.width=9, fig.asp=1/3}
+# ICE curves for three features
+features <- c("Age", "Sex", "Pclass")
+pdps <- lapply(features, FUN = function(x) {
+  partial(titanic_rfo, pred.var = x, plot = TRUE, plot.engine = "ggplot2",
+          which.class = "1", prob = TRUE, rug = TRUE, ice = TRUE, alpha = 0.1)
+})
+gridExtra::grid.arrange(grobs = pdps, nrow = 1)
+```
+
+
+---
+  
+# Example: Titanic (centered ICE curves)
+  
+```{r titanic-cice-top-3, fig.width=9, fig.asp=1/3}
+# c-ICE curves for three features
+features <- c("Age", "Sex", "Pclass")
+pdps <- lapply(features, FUN = function(x) {
+  partial(titanic_rfo, pred.var = x, plot = TRUE, plot.engine = "ggplot2",
+          which.class = "1", prob = TRUE, rug = TRUE, ice = TRUE, 
+          center = TRUE, alpha = 0.1)
+})
+gridExtra::grid.arrange(grobs = pdps, nrow = 1)
+```
+
+
+---
+  
+# Example: Titanic (PDP for  two features)
+  
+```{r titanic-pdp-Age-SibSp}
+# Two-dimensionsal PDP to visualize potential interaction effects
+partial(titanic_rfo, pred.var = c("Age", "Fare"), chull = TRUE, 
+        prob = TRUE, plot = TRUE, which.class = "1")
+```
+
+
+---
+
+.pull-left[
+
+# Why the pdp `r emo::ji("package")`?
+
+* Extremely flexible
+
+  - Can be used to obtain ICE curves, standard error bands, etc.; [example](https://bgreenwell.github.io/pdp/articles/pdp-se.Rmd.html)
+  - Can work with any model in R 
+  - Can work with any model in Python (via [reticulate](https://rstudio.github.io/reticulate/)); [scikit-learn example](https://bgreenwell.github.io/pdp/articles/pdp-reticulate.html)
+  
+* Fast compared to other implementations
+
+* Can use the fast *weighted tree traversal method* for [gbm](https://cran.r-project.org/package=gbm) models
+
+* **Can be run in parallel!**
+ 
+]
+
+.pull-right[
+
+# Why not the pdp `r emo::ji("package")`
+
+* The brute force approach is not always the most efficient!
+
+  - **Data.dodgerblue[Robot]**
+  
+  - Spark
+  
+  - Large training sets (.dodgerblue[sampling can help])
+  
+  - Calling a (potentially) expensive prediction function over and over (.dodgerblue[parallelization can help])
+
+]
+
+
+---
+  
+# Practical tip(s)
+  
+### Scaling up feature effects
+  
+* As it turns out, computing ICE curves (and hence, PDPs) can be done using (essentially) two operations:
+  
+  1. A simple *cross join* which can be done efficiently in SQL or Spark
+
+  2. A **single** call to a scoring function (which can often be done efficiently in parallel, Spark, Java scoring code, etc.)
+  
+* This is the motivation behind the (currently internal) [icecube](https://github.8451.com/DataRobot/icecube) package (`r emo::ji("warning")` **still a work in progress!!**)
+
+
+---
+
+# A more efficient approach?
+
+<img src="images/pdp-08.png" style="width: 130%" />
+
+
+---
+
+# A more efficient approach?
+
+<img src="images/pdp-09.png" style="width: 130%" />
+
+
+---
+
+# A more efficient approach?
+
+<img src="images/pdp-10.png" style="width: 130%" />
+
+
+---
+
+# A more efficient approach?
+
+<img src="images/pdp-11.png" style="width: 130%" />
+
+
+---
+
+# A more efficient approach?
+
+<img src="images/pdp-12.png" style="width: 130%" />
+
+
+---
+class: middle, center
+
+# The icecube package
+
+.center[
+
+<img src="images/diagram-icecube.png" style="width: 100%" />
+
+]
+
+
+---
+  
+# Example: Titanic (non-package approach)
+  
+```{r titanic-ice-curves-Age-Sex-Pclass-code, eval=FALSE}
+# Consruct ICE curves manually
+df1 <- expand.grid(Age = quantile(titanic$Age, probs = 1:49/50))
+df2 <- subset(titanic, select = -Age)
+ice_data <- tidyr::expand_grid(df1, df2)                     #<<
+ice_data$prediction <- pfun(titanic_rfo, newdata = ice_data)  #<<
+ice_data %>%
+  group_by(Age) %>%
+  mutate(row_id = 1:n()) %>%
+  ggplot(aes(x = Age, y = prediction, group = row_id,
+             color = Sex, linetype = Pclass)) +
+  geom_line(alpha = 0.5) +
+  labs(x = "Age (years)", y = "Prediction") +
+  ggtitle("ICE curves") +
+  theme_light()
+```
+
+
+---
+  
+# Example: Titanic (non-package approach)
+  
+```{r titanic-ice-curves-Age-Sex-Pclass-plot, echo=FALSE}
+# Consruct ICE curves manually
+df1 <- expand.grid(Age = quantile(titanic$Age, probs = 1:49/50))
+df2 <- subset(titanic, select = -Age)
+ice_data <- tidyr::expand_grid(df1, df2)                     #<<
+ice_data$prediction <- pfun(titanic_rfo, newdata = ice_data)  #<<
+ice_data %>%
+  group_by(Age) %>%
+  mutate(row_id = 1:n()) %>%
+  ggplot(aes(x = Age, y = prediction, group = row_id,
+             color = Sex, linetype = Pclass)) +
+  geom_line(alpha = 0.5) +
+  labs(x = "Age (years)", y = "Prediction") +
+  ggtitle("ICE curves") +
+  theme_light()
+```
+
+
+---
+  
+# Example: credit card default (Spark)
+  
+```{r spark-ice-data}
+# Define plotting grid
+df1 <- data.frame(pay_0 = -2:8) %>%
+  copy_to(sc, df = .)
+
+# Remove plotting variable from training data
+df2 <- select(credit_tbl, -pay_0) #%>%
+# sdf_with_sequential_id()  # add row id
+
+# Perform a cross join, compute predictions, then aggregate
+pdp <- df1 %>%
+  full_join(df2, by = character()) %>%  # cartesian product  #<<
+  ml_predict(credit_rfo, dataset = .) %>%
+  group_by(pay_0) %>%
+  summarize(yhat = mean(probability_yes)) %>%  # average for partial dependence  #<<
+  select(pay_0, yhat) %>%  # select plotting variables  #<<
+  arrange(pay_0) %>%  # for plotting purposes  #<<
+  collect()
+```
+
+
+---
+  
+# Example: credit card (Spark)
+  
+```{r spark-pdp}
+ggplot(pdp, aes(x = pay_0, y = yhat)) + geom_line()
+```
+
+
+---
+
+# Example: credit card (Spark)
+
+The [icecube](https://github.8451.com/DataRobot/icecube) `r emo::ji("package")` is meant to make this process a little easier...
+
+```{r credit-spark-icecube}
+# Construct ICE curves for `pay_0` from Spark ML-based random forest
+pay_0 <- data.frame(pay_0 = -2:8)  # not necessary, but works better here!  #<<
+ice <- gen_ice_data(credit, feature_names = "pay_0", feature_grid = pay_0,  #<< 
+                    sc = sc, sample_n = 1000, verbose = TRUE) %>%  #<<
+  ml_predict(credit_rfo, dataset = .) %>%  # add prediction column
+  select(pay_0, probability_yes, row_id) %>%  # grab columns of interest  
+  as.data.frame()  # bring into memory for plotting
+```
+
+```{r credit-spark-ice-curves-code, eval=FALSE}
+# Display ICE curves for `pay_0` with additional distribution information
+p1 <- ggplot(ice, aes(pay_0, probability_yes, group = row_id)) +
+  scale_x_continuous(breaks = -2:8) +
+  geom_line(alpha = 0.1)
+p2 <- ggplot(credit, aes(pay_0)) +  #<<
+  scale_x_continuous(breaks = -2:8) +  #<<
+  geom_bar()  #<<
+gridExtra::grid.arrange(p1, p2, nrow = 2)
+```
+
+
+---
+
+# Example: credit card (Spark)
+
+It's important take the distribution of the feature(s) into account when interpreting PDPs and ICE curves!
+
+```{r credit-spark-ice-curves, echo=FALSE}
+# Display ICE curves for `pay_0` with additional distribution information
+p1 <- ggplot(ice, aes(pay_0, probability_yes, group = row_id)) +
+  scale_x_continuous(breaks = -2:8) +
+  geom_line(alpha = 0.3)
+p2 <- ggplot(credit, aes(pay_0)) +
+  scale_x_continuous(breaks = -2:8) +
+  geom_bar()
+gridExtra::grid.arrange(p1, p2, nrow = 2)
+```
+
+
+---
+
+# PDPs and ICE curves
+
+.pull-left[
+## Drawbacks
+
+* PDPs for more than one feature (i.e., .blue[visualizing interaction effects]) can be computationally demanding
+
+* Correlated features lead to *extrapolating*
+
+]
+
+.pull-right[
+## Alternatives
+
+* ["Poor man's" PDPs](https://github.com/bgreenwell/pdp/issues/91); historically available in package [plotmo](https://cran.r-project.org/package=plotmo) and now available in [pdp](https://cran.r-project.org/package=pdp) (version >= 0.8.0)
+
+* [Accumulated local effect (ALE) plots](https://arxiv.org/abs/1612.08468)
+
+  - Jay Cunningham made a [Python version](https://github.8451.com/j260381/marge)!
+
+* [Stratified PDPs](https://arxiv.org/abs/1907.06698)
+
+* Shapley-based dependence plots
+
+]
+
+.center.font150[[Please Stop Permuting Features: An Explanation and Alternatives](https://arxiv.org/abs/1905.03151)]
+
+
+---
+class: inverse, middle, center
+
+# Shapley explanations
+
+<img src="images/logo-fastshap.png" style="width: 50%" />
+
+
+---
+
+# Explaining individual predictions
+
+* While discovering which features have the biggest *overall* impact on the model is important, it is often more informative to determine:
+
+  .MediumSeaGreen[Which features impacted a set of specific prediction, and how?
+
+* We can think of this as *local variable importance* (or *case-wise variable importance*)
+
+  - More generally referred to as *prediction explanations*
+  
+* Similar to reason codes, but in raw form
+  
+* Many different flavors, but we'll focus mainly on (arguably) the most important: .dodgerblue[*Shapley explanations*]
+
+
+---
+
+# Shapley explanations
+
+* Conveys how each feature value contributed to a prediction
+
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* `r emo::ji("scream")`
+
+* Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
+
+* The only prediction explanation method to satisfy several useful properties of *fairness*
+
+  1. Local accuracy (efficiency)
+  2. Missingness
+  3. Consistency (monotonicity)
+
+
+---
+
+# So what's a Shapley value?
+
+The Shapley value is the average marginal contribution of a .blue[*player*] across all possible .blue[*coalitions*] in a .blue[*game*] 
+
+$$\phi_i\left(x\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$
+
+--
+
+.pull-left[
+
+<img src="https://media.giphy.com/media/kaq6GnxDlJaBq/source.gif" style="width: 80%" />
+
+]
+
+.pull-right[
+
+.center.font150.tomato[WTF does that mean?]
+
+.font90[
+In the context of ML:
+
+* .blue[**Game**] = prediction task for a single observation $x$
+* .blue[**Gain**] = prediction for $x$ minus the average prediction for all training observations
+* .blue[**Players**] = the feature values of $x$ that collaborate to receive the gain (i.e., predict a certain value)
+]
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-alex-brad-brandon.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+Alex, Brad, and Brandon decide to go out for drinks after work. We shared a few pitchers of `r emo::ji("beer")`, but nobody payed attention to how much each person drank.
+
+.font150.purple[What's a *fair* way to split the tab?]
+
+]
+  
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-alex.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+If Alex drank alone, he'd only pay $10
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-brad.png" style="width: 100%" />
+
+]
+
+.pull-right[
+  
+If Brad drank alone, he'd only pay $20
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-brandon.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+If Brandon drank alone, he'd only pay $10
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-alex-brad.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+If Alex and Brad drank together, they'd only pay $25
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-alex-brandon.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+If Alex and Brandon drank together, they'd only pay $15
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-brad-brandon.png" style="width: 100%" />
+
+]
+
+.pull-right[
+
+If Brad and Brandon drank together, they'd only pay $13
+
+]
+
+
+---
+class: middle
+
+## A simple example `r emo::ji("beers")`
+
+.pull-left[
+
+<img src="images/moes-scenario-matrix.png" style="width: 100%" />
+
+]
+
+--
+
+.pull-right[
+
+<img src="images/moes-payoff-matrix.png" style="width: 100%" />
+
+]
+
+
+---
+
+# Shapley explanations
+
+.blue[**For the programmers**], implementing approximate Shapley explanations is rather straightforward:
+
+.center[
+<img src="images/shapley-algorithm.png" style="width: 70%" class="center" />
+]
+
+**Interpretation:** .purple[A Shapley explanation gives the contribution of a feature value to the difference between the actual prediction and the mean prediction] (averaged over all the training data).
+
+
+---
+class: middle
+
+```{r jack-hide, echo=FALSE}
+jack <- data.frame(
+  Pclass = factor(1, levels = 1:3),
+  Sex = factor("male", levels = c("female", "male")),
+  Age = 60,
+  SibSp = 0,
+  Parch = 0,
+  Fare = 26.55,
+  Embarked = factor("S", levels = c("", "C", "Q", "S"))
+)
+```
+
+# Meet Jack:
+
+.pull-left[
+
+![](https://media.giphy.com/media/vxkSNRqutidyg/giphy.gif)
+
+.middle[
+
+The model predicts Jack had a `r round(pfun(titanic_rfo, newdata = jack) * 100, digits = 2)`% chance of surviving the fated voyage.
+
+How did Jack's feature values contribute to his low predicted odds of surviving?
+  
+]
+
+]
+
+.pull-right[
+  
+```{r jack}
+# Jack Dawson
+jack <- data.frame(
+  Pclass = factor(1, levels = 1:3),
+  Sex = factor("male", levels = c("female", "male")),
+  Age = 60,
+  SibSp = 0,
+  Parch = 0,
+  Fare = 26.55,
+  Embarked = factor("S", levels = c("", "C", "Q", "S"))
+)
+  
+# Predicted probability of survial
+pfun(titanic_rfo, newdata = jack)
+```
+  
+]
+
+
+---
+class: center
+
+<br/><br/><br/><br/>
+
+.pull-left[
+
+![](https://media.giphy.com/media/3og0INAY5MLmEBubyU/giphy.gif)
+
+## Computing Shapley values can be slow...
+
+]
+
+--
+
+.pull-right[
+
+![](https://media.giphy.com/media/lRnUWhmllPI9a/source.gif)
+
+## Enter...[fastshap](https://cran.r-project.org/package=fastshap)
+
+]
+
+
+---
+  
+```{r jack-explain}
+# Data frame with feature columns only
+X <- subset(titanic, select = -Survived)  #<<
+
+# Explain Jack's prediction
+system.time({
+  set.seed(1455)  # for reproducibility
+  ex_jack <- explain(titanic_rfo, X = X, newdata = jack,
+                     pred_wrapper = pfun,  #<<
+                     nsim = 10000, adjust = TRUE)
+})
+ex_jack
+```
+
+
+---
+
+# Why the fastshap `r emo::ji("package")`?
+
+```{r titanic-shapley-benchmark, eval=FALSE}
+# Package: iBreakDown
+explainer <- DALEX::explain(titanic_rfo, data = X, y = titanic$Survived, 
+                            predict_function = pfun)
+system.time({
+  set.seed(1433)  # for reproducibility
+  ex_jack_iBreakDown <- iBreakDown::shap(explainer, B = 10000, 
+                                         new_observation = jack)
+})
+#     user   system  elapsed  #<<
+# 9386.774  219.370 2459.340  #<<
+
+# Package: iml
+predictor <- iml::Predictor$new(titanic_rfo, data = titanic, y = "Survived", 
+                                predict.fun = pfun, type = "prob")
+system.time({
+  set.seed(953)
+  ex_jack_iml <- iml::Shapley$new(predictor, x.interest = jack, 
+                                  sample.size = 10000)
+})
+#    user  system elapsed  #<<
+# 165.608   1.387  39.873  #<<
+```
+
+
+---
+
+# Why the fastshap `r emo::ji("package")`?
+
+<img src="images/fastshap-titanic-benchmarks.png" style="width: 100%" />
+
+
+---
+
+# Shapley-based contribution plot
+
+```{r jack-explain-plot}
+autoplot(ex_jack, type = "contribution", feature_values = jack)
+```
+
+
+---
+
+# Shapley-based force plot
+
+```{r jack-force-plot, eval=FALSE}
+force_plot(ex_jack, baseline = mean(pfun(titanic_rfo, newdata = X)),
+           feature_values = jack)
+```
+
+<img src="images/jack-force-plot.png" style="width: 100%" />
+
+
+---
+
+# Shapley values for all training rows
+
+```{r titanic-shapley-all, eval=FALSE}
+# Compute (approximate) explanations for all rows
+system.time({
+  set.seed(939)
+  ex <- explain(titanic_rfo, X = X, pred_wrapper = pfun, nsim = 1000, 
+                adjust = TRUE, .progress = "text")
+})
+#     user   system  elapsed 
+# 1685.179   26.884  465.510
+```
+
+```{r titanic-shapley-all-load, echo=FALSE}
+ex <- readRDS("data/titanic-fastshap-1000.rds")
+```
+
+
+---
+
+# Shapley values for all training rows
+
+.scrollable[
+
+```{r titanic-shapley-print}
+ex
+```
+
+]
+
+
+---
+
+# Shapley-based variable importance
+
+```{r titanic-shapley-importance}
+autoplot(ex)  # type = "importance"
+```
+
+
+---
+
+# Shapley-based dependence plot
+
+```{r titanic-shapley-dependence}
+autoplot(ex, type = "dependence", feature = "Age", X = X, 
+         color_by = "Sex", alpha = 0.5) +
+  geom_hline(yintercept = 0)
+```
+
+
+---
+
+# Shapley-based contribution plot
+
+```{r titanic-shapley-contribution}
+autoplot(ex, type = "contribution", row_num = 3L, feature_values = X[3L, ])
+```
+
+
+---
+
+# Example: credit card default (**Data.dodgerblue[Robot]**)
+
+```{r credit-datarobot-fastshap}
+# Prediction wrapper using drex and java scoring code
+mid <- "5e3a057b723f987b41841cff"
+pfun2 <- function(object, newdata) {
+  drex::get_predictions(
+    model = mid, new_data = newdata, method = "codegen", 
+    jar_path = paste0("jars/", mid, ".jar")
+  )[["yes"]]
+}
+
+# Data frame with only feature columns
+X <- subset(credit, select = -default)
+
+# Explain predictiton for first instance
+system.time({
+  set.seed(1918)  # for reproducibility
+  (ex <- explain(NULL, X = X, newdata = X[1L, ], nsim = 1000,
+                 pred_wrapper = pfun2, adjust = TRUE))
+})
+```
+
+
+---
+
+```{r credit-datarobot-fastshap-contribution}
+autoplot(ex, type = "contribution", feature_values = X[1L, ])
+```
+
+
+---
+  
+# Practical tip(s)
+
+* Shapley values are computationally intensive
+
+* If using the sampling approach described in this talk, then you may want to consider parallelizing across observations
+
+  - [fastshap](https://github.com/bgreenwell/fastshap) can also be parallelized across features; see [`?fastshap::explain`](https://bgreenwell.github.io/fastshap/reference/explain.html) for details
+
+* Efficient and exact solutions exist for certain classes of models `r Citep(bib, "lundberg-explainable-2019")`
+
+  - [XGBoost](https://github.com/dmlc/xgboost) (supported by [fastshap](https://github.com/bgreenwell/fastshap))
+  - [LightGBM](https://github.com/microsoft/LightGBM) 
+  - [CatBoost](https://catboost.ai/)
+
+## Alternatives:
+
+* *Local Interpretable Model agnostic Explanations* (.LimeGreen[LIME])
+
+* [Anchors](https://homes.cs.washington.edu/~marcotcr/aaai18.pdf): high-precision model-agnostic explanations
+
+
+---
+
+# ICE-based prediction explanations
+
+$$\phi_i\left(x\right) = f\left(x_1, x_2, \dots, x_p\right) - E\left[f\left(x_1, x_2, \dots, X_i, \dots, x_p\right)\right]$$
+
+Computing ICE-based prediction explanations (one for each row) for a particular feature (e.g., `Age`) can be done in three easy steps: 
+
+  1. .purple[Compute the predictions for each row]
+
+  2. .purple[Construct the ICE curves for each row]
+
+  3. .purple[Take the difference between the predictions and the average ICE scores (exemplar values)]
+
+* Equivalent to Shapley explanations for *additive models*
+
+* Can be misleading when strong interactions are present
+
+* Less accurate, but more efficient to compute and easier to scale!!
+
+* Same idea as Shapley explanations, but the interpretation of each value is different!
+
+
+---
+
+# Example: Titanic (ice-based explanations)
+
+### .tomato[Step 1:] Compute predictions
+
+```{r titanic-ice-based-explanations-01}
+X <- subset(titanic, select = -Survived)  # feature columns only  #<<
+preds <- pfun(titanic_rfo, newdata = X)  # training predictions  #<<
+```
+
+
+---
+
+# Example: Titanic (ice-based explanations)
+
+### .tomato[Steps 2 & 3:] Take the difference between the predictions and the average ICE scores (exemplars)
+
+```{r titanic-ice-based-explanations-02}
+ex <- NULL
+features <- setdiff(names(titanic), "Survived")
+for (feature in features) {  # requires icecube package
+  ice_data <- gen_ice_data(titanic, feature_names = feature, 
+                           percentiles = 1:49/50)  #<<
+  ice_data$prediction <- pfun(titanic_rfo, newdata = ice_data)
+  ex <- ice_data %>%
+    select(row_id, prediction) %>%
+    group_by(row_id) %>%
+    summarize(exemplar = mean(prediction)) %>%  #<<
+    arrange(row_id) %>%
+    transmute(ex = preds - exemplar) %>%  #<<
+    pull(ex) %>%
+    cbind(ex, .)
+}
+colnames(ex) <- features
+ex <- tibble::as_tibble(ex)
+```
+
+
+---
+
+# Example: Titanic (ice-based explanations)
+
+```{r titanic-ice-based-explanations-03}
+ex
+```
+
+
+---
+
+# Example: Titanic (ice-based explanations)
+
+```{r titanic-ice-based-explanations-04}
+# Trick the fastshap package into working with our explanations
+class(ex) <- c("explain", class(ex))
+
+# Importance plot (aggregate of all explanations)
+p1 <- autoplot(ex, type = "importance")
+
+# Plot explanation for a single row
+p2 <- autoplot(ex, type = "contribution", row_num = 3L,
+               feature_values = X[3L, ])
+```
+
+
+---
+
+# Example: Titanic (ice-based explanations)
+
+```{r titanic-ice-based-explanations-05}
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+---
+
+# Example: credit card default (**Data.dodgerblue[Robot]**)
+
+### Enhancing interpretability with [model debugging](https://github.com/jphall663/jsm_2019)
+
+```{r credit-datarobot-logloss-code, eval=FALSE}
+# Plot log loss vs. probability of default, stratfied by `pay_0`
+credit %>%
+  mutate(prob_yes = pfun2(model, newdata = .)) %>%
+  mutate(y = ifelse(credit$default == "yes", 1, 0)) %>%
+  mutate(log_loss = -y * log(prob_yes) - (1 - y) * log(1 - prob_yes)) %>%
+  ggplot(aes(x = prob_yes, y = log_loss, color = default)) + 
+    geom_point(alpha = 0.7) + 
+    facet_wrap(~ pay_0) +
+    xlab("Probability of default") +
+    ylab("Log loss")
+```
+
+
+---
+class: middle, center
+
+# Example: credit card default (**Data.dodgerblue[Robot]**)
+
+```{r credit-datarobot-logloss, echo=FALSE, out.width="100%"}
+# Plot log loss vs. probability of default, stratfied by `pay_0`
+credit %>%
+  mutate(prob_yes = pfun2(model, newdata = .)) %>%
+  mutate(y = ifelse(credit$default == "yes", 1, 0)) %>%
+  mutate(log_loss = -y * log(prob_yes) - (1 - y) * log(1 - prob_yes)) %>%
+  ggplot(aes(x = prob_yes, y = log_loss, color = default)) + 
+    geom_point(alpha = 0.5) + 
+    facet_wrap(~ pay_0) +
+    xlab("Probability of default") +
+    ylab("Log loss")
+```
+
+.blue[Notice anything troubling about the model's predictions?]
+
+
+---
+class: inverse, middle, center
+
+# Questions?
+
+
+---
+
+# References
+
+```{r refs, echo=FALSE, results="asis"}
+spark_disconnect(sc)
+PrintBibliography(bib)
+```

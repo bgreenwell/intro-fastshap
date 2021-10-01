@@ -1,0 +1,507 @@
+---
+title: "Scalable Shapley Explanations in R"
+subtitle: "An introduction to the fastshap package"
+author: "Brandon M. Greenwell"
+institute: "84.51/University of Cincinnati"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    css: ["default", "default-fonts", "custom.css"]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+## Shameless plug...`r emo::ji("books")`
+
+```{r book1, echo=FALSE}
+knitr::include_graphics("images/books.png")
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  # cache = TRUE,
+  crayon.enabled = TRUE,
+  dev = "svg",     
+  echo = TRUE,
+  error = FALSE,
+  fig.asp = 0.618,
+  fig.width = 6,
+  fig.retina = 3,  
+  out.width = "100%",
+  fig.align = "center",
+  size = "small",
+  message = FALSE,
+  warning = FALSE
+)
+
+# Set global R options
+options(
+  width = 9999,
+  servr.daemon = TRUE
+)
+
+ladd <- function(x, data = NULL, ..., plot = trellis.last.object()) {
+  return(plot + eval(substitute(latticeExtra::layer(foo, data = data, ...), 
+                                list(foo = substitute(x)))))
+}
+```
+
+---
+
+
+## Explaining individual predictions
+
+* While discovering which features have the biggest *overall* impact on the model is important, it is often more informative to determine:
+
+  .center.MediumSeaGreen[Which features impacted a specific set of predictions, and how?]
+
+* We can think of this as *local* (or *case-wise*) *variable importance*
+
+  - More generally referred to as *prediction explanations* or *feature contributions*  
+  
+* Many different flavors, but we'll focus on (arguably) the most popular: .dodgerblue[*Shapley explanations*]
+
+--
+
+For an arbitrary observation $\boldsymbol{x}_0$, Shapley values provide a measure of each feature values contribution to the difference
+
+$$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$
+
+
+---
+
+## Shapley explanations
+
+* Conveys how each features value contributed to prediction - *baseline* (or model performance)
+
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* `r emo::ji("scream")`
+
+* Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
+
+* The only prediction explanation method to satisfy several useful properties of .dodgerblue[*fairness*]:
+
+  1. Local accuracy (efficiency)
+  2. Missingness
+  3. Consistency (monotonicity)
+
+
+---
+
+## So, what's a Shapley value?
+
+The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .MediumSeaGreen[*game*]:
+
+$$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$
+
+--
+
+.pull-left[
+
+<img src="https://media.giphy.com/media/3o6MbbwX2g2GA4MUus/giphy.gif?cid=ecf05e471n8c85mbtirkm0ra4x4qa8ezo2idws6ag4f2rvtw&rid=giphy.gif&ct=g" style="width: 80%" />
+
+]
+
+.pull-right[
+
+.font90[
+In the context of predictive modeling:
+
+* .forestgreen[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
+* .forestgreen[**Gain**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations
+* .forestgreen[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the gain (i.e., predict a certain value)
+
+]
+
+]
+
+
+<!-- --- -->
+<!-- class: middle -->
+
+<!-- ## A simple example `r emo::ji("beers")` -->
+
+<!-- .pull-left[ -->
+
+<!-- <img src="images/moes-scenario-matrix.png" style="width: 80%" /> -->
+
+<!-- ] -->
+
+<!-- .pull-right[ -->
+
+<!-- <img src="images/moes-payoff-matrix.png" style="width: 100%" /> -->
+
+<!-- ] -->
+
+
+---
+
+## Approximating Shapley values
+
+.purple[**For the programmers**], implementing approximate Shapley explanations is rather straightforward [(Strumbelj et al., 2014)](https://dl.acm.org/doi/10.1007/s10115-013-0679-x):
+
+.center[
+<img src="images/shapley-algorithm.png" style="width: 100%" class="center" />
+]
+
+
+---
+class: middle
+
+A poor-man's implementation in R...
+
+```{r pseudo-code, eval=FALSE}
+sample.shap <- function(f, obj, R, x, feature, X) {
+  phi <- numeric(R)  # to store Shapley values
+  N <- nrow(X)  # sample size
+  p <- ncol(X)  # number of features
+  b1 <- b2 <- x
+  for (m in seq_len(R)) {
+    w <- X[sample(N, size = 1), ]  # randomly drawn instance  #<<
+    ord <- sample(names(w))  # random permutation of features  #<<
+    swap <- ord[seq_len(which(ord == feature) - 1)]  #<<
+    b1[swap] <- w[swap]  #<<
+    b2[c(swap, feature)] <- w[c(swap, feature)]  #<<
+    phi[m] <- f(obj, newdata = b1) - f(obj, newdata = b2)  #<<
+  }
+  mean(phi)
+}
+```
+
+
+---
+class: middle
+
+## Enter...**fastshap**
+
+* Explaining $N$ instances with $p$ features would require $2 \times m \times N \times p$ calls to $\hat{f}\left(\boldsymbol{b}_1\right) - \hat{f}\left(\boldsymbol{b}_2\right)$ 
+* [fastshap](https://cran.r-project.org/package=fastshap) reduces this to $2 \times m \times p$
+
+  - Trick here is to generate all the "Frankenstein instances" up front, and score the differences once: $\hat{f}\left(\boldsymbol{B}_1\right) - \hat{f}\left(\boldsymbol{B}_2\right)$
+  
+      * Logical subsetting! (http://adv-r.had.co.nz/Subsetting.html)
+      
+  - It's also parallelized across predictors
+  
+  - Supports Tree SHAP implementation in [xgboost](https://cran.r-project.org/package=xgboost) and [lightgbm](https://cran.r-project.org/package=lightgbm) packages (woot!)
+
+
+---
+class: middle
+
+## Simple benchmark
+
+Explaining a single observation from a [ranger](https://cran.r-project.org/web/packages/ranger/index.html)-based random forest fit to the well-known [titanic](https://cran.r-project.org/package=titanic) data set.
+
+```{r, echo=FALSE, out.width="90%"}
+res <- readRDS("data/benchmark-results.rds")
+
+# Plot results
+par(
+  mar = c(4, 4, 0.1, 0.1),
+  cex.lab = 0.95,
+  cex.axis = 0.8,
+  mgp = c(2, 0.7, 0),
+  tcl = -0.3,
+  las = 1
+)
+palette("Okabe-Ito")
+plot(res$nsim, res$iBreakDown, type = "b", xlab = "Number of Monte Carlo repetitions",
+     ylab = "Time (in seconds)", col = 2,
+     xlim = c(0, max(res$nsim)), ylim = c(0, 10))#ylim = c(0, max(times1, times2, times3)))
+lines(res$nsim, res$iml, type = "b", col = 3)
+lines(res$nsim, res$fastshap, type = "b", col = 4)
+legend("topright", bty = "n",
+       legend = c("iBreakDown", "iml", "fastshap"),
+       lty = 1, pch = 1, col = c(2, 3, 4), inset = 0.02)
+abline(h = 0, lty = 2)
+palette("default")
+```
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-setup}
+library(ggplot2)
+library(ranger)
+library(fastshap)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# Read in the data and clean it up a bit
+titanic <- titanic::titanic_train
+features <- c(
+  "Survived",  # passenger survival indicator
+  "Pclass",    # passenger class
+  "Sex",       # gender
+  "Age",       # age
+  "SibSp",     # number of siblings/spouses aboard
+  "Parch",     # number of parents/children aboard
+  "Fare",      # passenger fare
+  "Embarked"   # port of embarkation
+)
+titanic <- titanic[, features]
+titanic$Survived <- as.factor(titanic$Survived)
+titanic <- na.omit(titanic)  # ...umm?
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-rfo, eval=TRUE, cache=TRUE}
+# Fit a (default) random forest
+set.seed(1046)  # for reproducibility
+rfo <- ranger(Survived ~ ., data = titanic, probability = TRUE)
+
+# Prediction wrapper for `fastshap::explain()`; has to return a 
+# single (atomic) vector of predictions
+pfun <- function(object, newdata) {  # computes prob(Survived=1|x)
+  predict(object, data = newdata)$predictions[, 2]
+}
+
+# Estimate feature contributions for each imputed training set
+X <- subset(titanic, select = -Survived)  # features only!
+set.seed(1051)
+(ex.all <- 
+   explain(rfo, X = X, nsim = 100, adjust = TRUE,  #<<
+           pred_wrapper = pfun))                   #<<
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-shap-all-plots, eval=TRUE, cache=TRUE, out.width = "80%"}
+p1 <- autoplot(ex.all)
+p2 <- autoplot(ex.all, type = "dependence", feature = "Age", X = X,
+               color_by = "Sex", alpha = 0.5) + theme(legend.position = c(0.8, 0.8))
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+Explaining an individual row (i.e., passenger); inspiration for this example taken from [here](https://modeloriented.github.io/iBreakDown/articles/vignette_iBreakDown_titanic.html).
+
+.pull-left[
+.scrollable.code70[
+```{r titanic-jack}
+# Explain an individual passenger
+jack.dawson <- data.frame(
+  # Survived = factor(0, levels = 0:1),  # in case you haven't seen the movie
+  Pclass = 3,
+  Sex = factor("male", levels = c("female", "male")),
+  Age = 20,
+  SibSp = 0,
+  Parch = 0,
+  Fare = 15,  # lower end of third-class ticket prices
+  Embarked = factor("S", levels = c("", "C", "Q", "S"))
+)
+```
+]
+
+]
+.pull-right[
+
+```{r jack, echo=FALSE}
+knitr::include_graphics("images/jack.jpg")
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+```{r titanic-jack-ex}
+(pred.jack <- pfun(rfo, newdata = jack.dawson))
+(baseline <- mean(pfun(rfo, newdata = X)))
+
+# Estimate feature contributions for Jack's predicted probability
+set.seed(754)
+(ex.jack <- 
+    explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
+          adjust = TRUE, pred_wrapper = pfun))
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+```{r titanic-jack-ex-plot, echo=FALSE, fig.keep="last"}
+library(waterfall)
+
+res <- data.frame(
+  "feature" = paste0(names(jack.dawson), "=", t(jack.dawson)),
+  "shapley.value" = t(ex.jack)
+)
+palette("Okabe-Ito")
+waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
+               summaryname = "Total: f(x) - baseline", col = 2:3,
+               xlab = "Probability of survival")
+ladd(panel.abline(v = pred.jack, lty = 2, col = 1))
+ladd(panel.abline(v = baseline, lty = 2, col = 1))
+ladd(panel.text(0.105, 4, labels = "f(x)", col = 1))
+ladd(panel.text(0.375, 4, labels = "baseline", col = 1))
+palette("default")
+```
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+```{r ccfraud-setup}
+library(fastshap)
+library(ggplot2)
+library(isotree)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
+
+# Read in credit card fraud data
+ccfraud <- data.table::fread("data/ccfraud.csv")
+
+# Randomize the data
+set.seed(2117)  # for reproducibility
+ccfraud <- ccfraud[sample(nrow(ccfraud)), ]
+
+# Split data into train/test sets
+set.seed(2013)  # for reproducibility
+trn.id <- sample(nrow(ccfraud), size = 10000, replace = FALSE)
+ccfraud.trn <- ccfraud[trn.id, ]
+ccfraud.tst <- ccfraud[-trn.id, ]
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+```{r ccfraud-ifo, cache=TRUE}
+# Fit a default isolation forest (unsupervised)
+ifo <- isolation.forest(ccfraud.trn[, 1L:30L], random_seed = 2223, 
+                        nthreads = 1)
+
+# Compute anomaly scores for the test observations
+head(scores <- predict(ifo, newdata = ccfraud.tst))
+```
+]
+
+
+<!-- --- -->
+<!-- class: middle -->
+
+<!-- ### Example: understanding anomalous credit card transactions -->
+
+<!-- ```{r ccfraud-ifo-gain, echo=FALSE} -->
+<!-- # Plot cumulative gain chart -->
+<!-- ord <- order(scores, decreasing = TRUE) -->
+<!-- y <- ccfraud.tst$Class[ord]  # order according to sorted scores -->
+<!-- prop <- seq_along(y) / length(y) -->
+<!-- lift <- cumsum(y) / sum(ccfraud.tst$Class)  # convert to proportion -->
+<!-- ccfraud.lift <- data.frame(prop, lift) -->
+<!-- palette("Okabe-Ito") -->
+<!-- ggplot(ccfraud.lift, aes(prop, lift)) + -->
+<!--   geom_line(color = 2) + -->
+<!--   geom_abline(intercept = 0, slope = 1, linetype = 2, color = 1) + -->
+<!--   scale_x_continuous(breaks = 0:10 / 10) + -->
+<!--   scale_y_continuous(breaks = 0:10 / 10) + -->
+<!--   xlab("Proportion of sample inspected") + -->
+<!--   ylab("Proportion of anomalies identified") -->
+<!-- palette("default") -->
+<!-- ``` -->
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+```{r ccfraud-ifo-ex, cache=TRUE}
+# Find test observations corresponding to maximum anomaly score
+max.id <- which.max(scores)  # row ID for observation wit
+max.x <- ccfraud.tst[max.id, ]
+max(scores)
+
+X <- ccfraud.trn[, 1L:30L]  # feature columns only!
+max.x <- max.x[, 1L:30L]  # feature columns only!
+pfun <- function(object, newdata) {  # prediction wrapper
+  predict(object, newdata = newdata)
+}
+
+# Generate feature contributions
+set.seed(1351)  # for reproducibility
+ex <- explain(ifo, X = X, newdata = max.x, pred_wrapper = pfun, 
+              adjust = TRUE, nsim = 1000)
+
+# Should sum to f(x) - baseline whenever `adjust = TRUE`
+sum(ex)   
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+```{r ccfraud-ifo-ex-plot, echo=FALSE, fig.width=8, fig.keep="last"}
+res <- data.frame(
+  "feature" = paste0(names(ex), "=", round(t(max.x), digits = 2)),
+  "shapley.value" = as.numeric(as.vector(ex[1L,]))
+)
+pred.max.x <- pfun(ifo, newdata = max.x)
+baseline <- mean(pfun(ifo, newdata = X))
+palette("Okabe-Ito")
+waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
+               summaryname = "Total: f(x) - baseline", col = 2:3,
+               xlab = "Probability of survival")
+ladd(panel.abline(v = pred.max.x, lty = 2, col = 1))
+ladd(panel.abline(v = baseline, lty = 2, col = 1))
+ladd(panel.text(0.8, 8, labels = "f(x)", col = 1))
+ladd(panel.text(0.375, 8, labels = "baseline", col = 1))
+palette("default")
+```
+
+
+---
+class: middle, center
+
+## Thank you
+
+<img src="https://media.giphy.com/media/3orifiI9P8Uita7ySs/giphy.gif" style="width: 80%" />
+

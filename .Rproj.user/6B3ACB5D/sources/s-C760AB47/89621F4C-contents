@@ -1,0 +1,883 @@
+% TODO:
+%
+% * Menze et al. (2011) discusses tree ensemble models with oblique trees.
+%
+% * Is bootstrap discussed anywhere first? If not, it probably should be. Also
+%   mention the following: "Unless specified otherwise, bootstrap sampling 
+%   refers to drawing a sample of size N from N observations with replacement."
+
+<<parent-ensembles, include=FALSE>>=
+set_parent("book.Rnw")
+@
+
+<<ensembles-setup, include=FALSE>>=
+# Load required packages
+library(ggplot2)
+
+# Set the plotting theme
+theme_set(theme_bw())
+
+# Custom color scale
+scale_oi <- function(n = 2, fill = FALSE, alpha = 1, ...) {
+  okabe.ito <- palette.colors(n, palette = "Okabe-Ito", alpha = alpha)
+  if (isFALSE(fill)) {
+    scale_colour_manual(values = unname(okabe.ito), ...)
+  } else {
+    scale_fill_manual(values = unname(okabe.ito), ...)
+  }
+}
+
+# Colorblind-friendly palette
+cb.cols <- unname(palette.colors(8, palette = "Okabe-Ito"))
+
+# Helper functions
+err <- function(pred, obs) {
+  1 - sum(diag(table(pred, obs))) / length(obs) 
+}
+@
+
+\FIXME{Show some class boundaries comparing single tree to bagged and boosted tree ensembles?}
+
+\FIXME{Moce Example section to "Software and examples" section for consistency with other chapters?}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Ensemble algorithms\label{chap:ensembles}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% \begin{VF}
+% Audience, we need your help. If you're ready, on your keypads, using A, B, C, or D, vote now!
+% 
+% \VA{Regis Philbin}{Who Wants to be a Millionaire}
+% 
+% \end{VF}
+
+\begin{VF}
+You know me, I think there ought to be a big old tree right there. And let's give him a friend. Everybody needs a friend.
+
+\VA{Bob Ross}{}
+\end{VF}
+
+This chapter serves as a basic introduction to \emph{ensembles}; specifically, ensembles of trees, although the ensemble methods discussed in this chapter are general algorithms that can also be applied to non--tree-based methods. The idea of ensemble modeling is to combine many models together in an attempt to increase overall prediction accuracy. As we'll see in this chapter, how the individual models are created and combined differ between the various ensembling techniques. %As we'll see, this idea is not new and in fact, you've probably already been exposed to the same ideas elsewhere.
+
+Have you ever watched the show \emph{Who Wants to be a Millionaire?} If not, the game is very simple. A contestant is asked a series of multiple choice questions (each with four choices) of increasing difficulty, with a top prize of \$1,000,000. The contestant is allowed to use three "lifelines", a form of assistance to help the contestant with difficult questions. Over the years, a number of different lifelines were made available (e.g., the contestant could choose to randomly eliminate two of the incorrect answers). One of the most useful lifelines (IMO) involved polling the audience. If the contestant chose this lifeline, each audience member was able to use a device to cast their vote as to what they though was the correct answer. The proportion of votes for each multiple choice answer was displayed to the contestant who could then choose to go with the popular vote or not. This lifeline was notorious for its accuracy; according to some sources, Regis Philbin (one of the hosts) once stated that the audience is right 95\% of the time!
+
+So why was polling the audience so accurate? As it turns out, this phenomenon has been observed for centuries and is often referred to as \emph{the wisdom of the crowd}; in particular, it is often the case that the aggregated answers from a large, diverse group of individuals is as accurate, if not more accurate, than the answer from any one individual from the group. For an interesting example, try looking up the phrase "Francis Galton Ox weight guessing" in a search engine. Another neat example is to ask a large number of individuals to guess how many jelly beans are in a jar, after you've eaten a handful, of course. If you look at the individual guesses, you'll likely notice that they vary all over the place. The average guess, however, tends to be closer than most of the individual guesses. 
+
+In a way, ensembles use the same idea to help improve the predictions (i.e., guesses) of an individual model, and are among the most powerful supervised learning algorithms in existence. While there are many different types of ensembles, they tend to share the same basic structure:
+\begin{equation}
+\label{eqn:ensembles-ensemble}
+  f_B\left(\boldsymbol{x}\right) = \beta_0 + \sum_{b = 1}^B \beta_b f_b\left(\boldsymbol{x}\right),
+\end{equation}
+where $B$ is the size of the ensemble, and each member of the ensemble $f_b\left(\boldsymbol{x}\right)$ (also called a \emph{base learner}) is a different function of the input variables derived from the training data. 
+
+\FIXME{Need to fix reference to MARS since that section will likely be moved to the online compliments.}
+
+\FIXME{Second part of this paragraph almost seems out of place. Does noting that other algorithms share a similar basis expansion help with anything?}
+
+In this chapter, our interests lie primarily in using decision trees for the base learners---typically, CART-like decision trees (Chapter~\ref{chap:brpart}), but any tree algorithm will work. As discussed in \citet[Section~10.2]{hastie-2009-elements}, many supervised learning algorithms (not just ensembles) can be seen as some form of additive expansion like \eqref{eqn:ensembles-ensemble}. A single decision tree is a perfect example of an additive expansion. For a single tree, $f_b\left(\boldsymbol{x}\right) = f_b\left(\boldsymbol{x}; \theta_b\right)$, where $\theta_b$ collectively represents the splits and split points leading to the $b$-th terminal node region, whose prediction is given by $\beta_b$ (i.e., the terminal node mean response for regression trees). Other examples include \emph{single-hidden-layer neural networks} and MARS (Section~\ref{sec:alternative-mars}.), among others.
+
+There exist many different flavors of ensembles, and they all differ in the following ways:
+
+\begin{itemize}
+
+  \item the choice of the base learners $f_b\left(\boldsymbol{x}\right)$ (although here the base learners will always be some form of decision tree);
+  
+  \item how the base learners are derived from the training data;
+  
+  \item the method for obtaining the estimated coefficients (or weights) $\left\{\beta_b\right\}_{b = 1}^B$.
+  
+\end{itemize}
+
+The ensemble algorithms discussed in this book fall into two broad categories, to be discussed over the next two sections: \emph{bagging} (Section~\ref{sec:ensembles-bagging}), short for \strong{b}ootstrap \strong{agg}regat\strong{ing}), and \emph{boosting} (Section~\ref{sec:ensembles-boosting}).
+
+% The easiest way to illustrate the effect of tree ensembles is through a simple example. Consider the data in Figure~\ref{fig:ensembles-sine-wave} which were generated from a simple sine wave with Gaussian noise:
+% \begin{equation}
+% \nonumber
+%   \mathcal{Y}_i = \sin\left(x_i\right) + \epsilon_i, \quad i = 1, 2, \dots, n,
+% \end{equation}
+% where $X_i \stackrel{iid}{\sim} \mathcal{U}\left(0, 2\pi\right)$ and $\epsilon_i \stackrel{iid}{\sim} \mathcal{N}\left(0, \sigma^2\right)$. Each panel shows an individual tree (base learner) and an ensemble thereof. On the left, we have deep decision tree that is obviously overfitting the data and has high variance. On the right, we have a shallow decision tree that is obviously underfitting the data. Neither model is going to be accurate when applied to new data from the same population. In Section~\ref{sec:pruning} I showed how cost-complexity pruning with $k$-fold cross-validation can be used to identify a useful subtree somewhere in between---a tree that strikes a good balance of bias and variance. However, the next two sections will introduce ensemble algorithms that can often improve the performance of an individual trees with high variance (Section~\ref{sec:bagging}) or high bias (Section~\ref{sec:boosting}). Examples of the impact of ensembling decision trees are given by the blue lines in each panel.
+
+% FIXME:
+% Nicely worded explanation from HOMLR book:
+% Bagging works especially well for unstable, high variance base learners—algorithms whose predicted output undergoes major changes in response to small changes in the training data (Dietterich 2000b, 2000a). This includes algorithms such as decision trees and KNN (when k is sufficiently small). However, for algorithms that are more stable or have high bias, bagging offers less improvement on predicted outputs since there is less variability (e.g., bagging a linear regression model will effectively just return the original predictions for large enough b).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Bootstrap aggregating (bagging) \label{sec:ensembles-bagging}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\FIXME{Make sure it is known in the CART chapter that larger trees are more unstable.}
+
+Bagging \citep{breiman-1996-bagging} is a \emph{meta-algorithm} based on aggregating the results of multiple bootstrap samples\footnote{Unless stated otherwise, a bootstrap sample refers to a sample of size $N$ with replacement from a sample of $N$ observations.}. In the context of machine learning, this means aggregating the predictions from different base learners derived from independent bootstrap samples. When applied to unstable learners that are adaptive to the data, like overgrown/unprunned decision trees, the aggregated predictions can often be more accurate than the individual predictions from a single base learner trained on the original learning sample. 
+
+While bagging is a general algorithm, and can be applied to any type of base learner, it is most often successfully applied to decision trees, in particular, trees that have been fully grown to near-maximal depth without any pruning. As we leaned in Chapter~\ref{chap:brpart}, unpruned decision trees are considered unstable learners and have high variance (i.e., the predictions will vary quite a bit from sample to sample), which often results in overfitting and poor generalization performance. However, through averaging, bagging can often stabilize and reduce variance (see Section~\ref{sec:rf-variance}) while maintaining low bias, which can result in improved performance.  %This is similar to the concept of model stacking\footnote{Stacking is more general and typically involves combining the prediction from different types of base learners that were applied to the same training sample.}, but as we'll see, it is particularly useful when applied to certain types of models, especially overgrown decision trees.
+
+<<ensembles-bagging-sine-wave, echo=FALSE, cache=TRUE>>=
+library(rpart)
+
+# Simulate sine wave data
+gen_sine <- function(n = 500, sigma = 0.3) {
+  x <- runif(n, min = 0, max = 2 * pi)
+  data.frame(x, y = sin(x) + rnorm(n, sd = sigma))
+}
+set.seed(1503)  # for reproducibility
+trn <- gen_sine()
+tst <- gen_sine(10000)
+
+# Helper function
+MSE <- function(pred, obs) {
+  mean((pred - obs) ^ 2)
+}
+
+# Generate finer grid of predictor values
+xgrid <- data.frame(x = seq(from = 0, to = 2 * pi, length = 500))
+
+# Single (overgrown) decision tree
+tree <- rpart(y ~ x, data = trn, 
+              control = rpart.control(minsplit = 2, cp = 0, xval = 0))
+pred.tree <- predict(tree, newdata = xgrid)
+
+# Bagged tree ensemble
+set.seed(1013)  # for reproducibility
+bag <- ipred::bagging(y ~ x, data = trn, nbagg = 1000)
+pred.bag <- predict(bag, newdata = xgrid)
+
+# Compute MSE on test set
+mse.tree <- MSE(predict(tree, newdata = tst), obs = tst$y)
+mse.bag <- MSE(predict(bag, newdata = tst), obs = tst$y)
+@
+
+We'll illustrate the effect of bagging through a simple example. Consider a training sample of size $N = 500$ generated from the following sine wave with Gaussian noise:
+\begin{equation}
+\nonumber
+  Y_i = \sin\left(X_i\right) + \epsilon_i, \quad i = 1, 2, \dots, N,
+\end{equation}
+where $X_i \stackrel{iid}{\sim} \mathcal{U}\left(0, 2\pi\right)$ and $\epsilon_i \stackrel{iid}{\sim} \mathcal{N}\left(0, \sigma = 0.3\right)$. Figure~\ref{fig:ensembles-bagging-sine-wave-plot} (left) shows the prediction surface from a single (overgrown) decision tree grown to near full depth.\footnote{In this example, each tree was fit using \code{rpart()} with \code{minsplit = 2} and \code{cp = 0}.} Figure~\ref{fig:ensembles-bagging-sine-wave-plot} (right) shows a bagged ensemble of $B = 1000$ such trees whose predictions have been averaged together; here, each tree was induced from a different bootstrap sample of the original data points. Clearly the individual tree is too complex (i.e., low bias and high variance) and will not generalize well to new samples, but averaging many such trees together resulted in a smoother, more stable prediction. The MSE from an independent test set of 10,000 observations was \Sexpr{round(mse.tree, digits = 3)} for the single tree and \Sexpr{round(mse.bag, digits = 3)} for the bagged tree ensemble; the minimum obtainable MSE for this example is $\sigma^2 = 0.3 ^ 2 = 0.09$. \FIXME{Double check that this is true.}
+
+%Each panel shows an individual tree (base learner) and an ensemble thereof. On the left, we have deep decision tree that is obviously overfitting the data and has high variance. On the right, we have a shallow decision tree that is obviously underfitting the data. Neither model is going to be accurate when applied to new data from the same population. In Section~\ref{sec:pruning} I showed how cost-complexity pruning with $k$-fold cross-validation can be used to identify a useful subtree somewhere in between---a tree that strikes a good balance of bias and variance. However, the next two sections will introduce ensemble algorithms that can often improve the performance of an individual trees with high variance (Section~\ref{sec:bagging}) or high bias (Section~\ref{sec:boosting}). Examples of the impact of ensembling decision trees are given by the blue lines in each panel.
+
+<<ensembles-bagging-sine-wave-plot,  echo=FALSE, cache=TRUE, fig.asp=0.5, fig.cap="Simulated sine wave example ($N = 500$). Left: a single (overgrown) regression tree. Right: a bagged ensemble of $B = 1000$ overgrown regression trees whose predictions have been averaged together; here each tree was induced from a different bootstrap sample of the original data points. The individual tree is too complex (i.e., low bias and high variance) but averaging many such trees together results in a more stable prediction and smoother fit.">>=
+# Plot results
+p1 <- ggplot(trn, aes(x, y)) +
+  geom_point(shape = 1, alpha = 0.3) +
+  stat_function(fun = sin, colour = "black") +
+  geom_line(data = data.frame(x = xgrid, y = pred.tree),
+            color = cb.cols[2]) +
+  ggtitle("Overgrown decision tree")
+p2 <- ggplot(trn, aes(x, y)) +
+  geom_point(shape = 1, alpha = 0.3) +
+  stat_function(fun = sin, colour = "black") +
+  geom_line(data = data.frame(x = xgrid, y = pred.bag),
+            color = cb.cols[2]) +
+  ggtitle("Bagged tree ensemble")
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+@
+
+The general steps for bagging classification and regression trees are outlined in Algorithm~\ref{alg:ensembles-bagging}, and a simple schematic of the process for building a bagged tree ensemble with four trees is given in Figure~\ref{fig:ensembles-bagging-diagram}. Note that bagged tree ensembles can be extended beyond simple classification and regression trees. For example, it is possible to bag survival trees \citep{hothorn-2004-bagging}. An improved bagging strategy specific to decision trees, called \emph{random forest}, is the topic of Chapter~\ref{chap:rf}. 
+
+\begin{algo}[!htb]
+\begin{enumerate}[label=\arabic*)]
+
+  \item Start with a training sample, $\boldsymbol{d}_{trn}$, and specify integers $n_{min}$ (the minimum node size of a particular tree), and $B$ (the number of trees in the ensemble).
+  
+  \item For $b$ in $1, 2, \dots, B$:
+  
+  \begin{enumerate}
+  
+    \item Select a bootstrap sample $\boldsymbol{d}_{trn} ^ \star$ of size $N$ from $\boldsymbol{d}_{trn}$.
+    
+    \item \strong{Optional:} Keep track of which observations from $\boldsymbol{d}_{trn}$ were not selected to be in $\boldsymbol{d}_{trn} ^ \star$; these are called the \emph{out-of-bag} (OOB) observations.
+    
+    \item Fit a decision tree $\mathcal{T}_b$ to $\boldsymbol{d}_{trn} ^ \star$ by recursively splitting each terminal node until the minimum node size ($n_{min}$) is reached.
+      
+  \end{enumerate}
+  
+  \item Return the ensemble of trees: $\left\{\mathcal{T}_b\right\}_{b = 1} ^ B$.
+  
+  \item To obtain the bagged prediction $\widehat{f}_B\left(\boldsymbol{x}\right)$ for a new case $\boldsymbol{x}$, pass the observation down each tree---which will results in $B$ predictions (one from each tree)---and aggregate as follows:
+  
+  \begin{itemize}
+  
+    \item Classification: $\widehat{f}_B\left(\boldsymbol{x}\right) = vote\left\{\mathcal{T}_b\left(\boldsymbol{x}\right)\right\}_{b = 1} ^ B$, where $\mathcal{T}_b\left(\boldsymbol{x}\right)$ is the predicted class label for $\boldsymbol{x}$ from the $b$-th tree in the ensemble (in other words, let each tree vote on the classification for $\boldsymbol{x}$ and take a majority/plurality vote).%; see Figure~\ref{fig:ensembles-bagging-classification-diagram}. 
+    
+    \item Regression: $\widehat{f}_B\left(\boldsymbol{x}\right) = \frac{1}{B} \sum_{b = 1} ^ B\mathcal{T}_b\left(\boldsymbol{x}\right)$ (in other words, we just average the predictions for case $\boldsymbol{x}$ across all the trees in the ensemble).%; see Figure~\ref{fig:ensembles-bagging-regression-diagram}.
+    
+  \end{itemize}
+  
+\end{enumerate}
+\caption{Bagging for classification and regression trees. \label{alg:ensembles-bagging}}
+\end{algo}
+
+The (optional) OOB data in step 2) (b) of Algorithm~\ref{alg:ensembles-bagging} will be discussed in Section~\ref{sec:rf-oob}, so just ignore it for now. The recommended default value for $n_{min}$ (the minimum size of any terminal node) depends on the type of response variable:
+\begin{itemize}
+
+  \item For classification, the typical default is $n_{min} = 1$.
+  
+  \item For regression, the typical default is $n_{min} = 5$.
+
+\end{itemize}
+
+Class probability estimates for categorical outcomes can also be obtained from bagged tree ensembles and different approaches are discussed in Section~\ref{sec:rf-prob}.
+
+<<ensembles-bagging-diagram, echo=FALSE, fig.cap="A simple schematic of the process for building a bagged tree ensemble with four trees.">>=
+knitr::include_graphics("diagrams/chap-ensembles-bagging.png", error = FALSE)
+@
+
+% For regression, a maximum depth tree is one where the minimum number of observations in any terminal node is five; for classification it's one. Traditionally, CART was used for the base learners in a random forest, but any decision tree algorithm will work (e.g., GUIDE or CTree). Also, Breiman originally only implemented the Gini and RSS splitting criteria (Section~\ref{sec:splitting}) for classification and regression problems, respectively, but many other split statistics have been shown to be useful.
+
+Bagging has the same structural form as \eqref{eqn:ensembles-ensemble} with $\beta_0 = 0$ and $\left\{\beta_b = 1 / B\right\}_{b = 1}^B$, and where each tree is induced from independent bootstrap samples of the training data and grown to near maximal depth (as specified by $n_{min}$). An important aspect of how the trees are constructed in bagging is that they are induced from independent bootstrap samples, which makes the bagging procedure is \emph{embarrassingly parallel}. %(Exercise~\ref{ex:ensembles-bagging-parallel}).
+
+
+%-------------------------------------------------------------------------------
+\subsubsection{Classification and the margin}
+%-------------------------------------------------------------------------------
+
+\FIXME{Beef up this section.}
+
+This is a good time to introduce the concept of \emph{the margin} for classification in bagged ensembles. The margin of an observation $\boldsymbol{x}$ is the difference between the proportion of times the case was correctly classified and the proportion of times it was incorrectly classified, across the $B$ base learners in the ensemble. In essence, high margins are desirable because it implies the algorithm is more confident in the classifications. We'll talk a bit more about the margin in Chapter~\ref{chap:rf}.
+
+
+%-------------------------------------------------------------------------------
+\subsection{When does bagging work?}
+%-------------------------------------------------------------------------------
+
+% As noted in \citet[Section~8.7]{hastie-2009-elements}, the bagged estimate $\widehat{f}_{bag}\left(x\right)$ will only improve the performance of the base learner (e.g., an individual tree in this chapter) when the latter is a nonlinear or adaptive function of the training data. For example, bagging a linear regression model will effectively just return the original predictions for large enough $B$. See Exercise~\ref{ex:ensembles-bagging-linear}. Boosting, on the other hand, tends to benefit from more stable, but weak learners, like shallow decision trees.
+
+\FIXME{Need to fix MARS reference if pointing to online compliments.}
+
+In general, bagging helps to improve the accuracy of unstable procedures that are adaptive, nonlinear functions of the learning sample $\boldsymbol{d}_{trn}$ \citep{breiman-1996-bagging}. Let $\widehat{f}$ represent an individual model (e.g., a single decision tree) trained to the learning sample and $\widehat{f}_B$ represent a bagged ensemble thereof. Specifically, if small changes in $\boldsymbol{d}_{trn}$ lead to small changes in $\widehat{f}$, then $\widehat{f}_B \approx \widehat{f}$ and not much is gained in terms of improvement. On the other hand, if small changes in $\boldsymbol{d}_{trn}$ lead to large changes in $\widehat{f}$, then $\widehat{f}_B$ will often be an improvement over $\widehat{f}$. In the latter case, we often call $\widehat{f}$ an unstable model. \citet{breiman-1996-heuristics} noted that algorithms like \emph{neural networks}, classification and regression trees (Chapter~\ref{chap:brpart}), and subset selection in linear regression were unstable, while algorithms like $k$-nearest neighbor methods were stable; the MARS procedure (Section~\ref{sec:mars}) can also be considered as unstable and therefore potentially benefit from bagging). 
+
+Unpruned CART-like decision trees are particularly unstable predictors; that is, the tree structure will often vary heavily from one sample to the next. Hence, bagging is often most successful when applied to unpruned decision trees that have been grown to maximum (or near maximum) depth. 
+
+
+%-------------------------------------------------------------------------------
+\subsection{Bagging from scratch: classifying email spam \label{sec:ensembles-bagging-scratch}}
+%-------------------------------------------------------------------------------
+
+\FIXME{Make sure email spam example is acutally used before this section.}
+
+To illustrate, let's return to the email spam example. In the code snippet below, we load the data from the \pkg{kernlab} package and split the observations into train/test sets using the same 70/30 split as before.
+
+<<ensembles-spam>>=
+data(spam, package = "kernlab")
+set.seed(852)  # for reproducibility
+id <- sample.int(nrow(spam), size = floor(0.7 * nrow(spam)))
+spam.trn <- spam[id, ]  # training data
+spam.tst <- spam[-id, ]  # test data
+@
+
+Rather than writing our own bagger function, we'll construct a bagged tree ensemble using a basic \code{for} loop that stores the individual trees in a list called \code{spam.bag}. Note that we turn off cross-validation (\code{xval = 0} when calling \code{rpart()} to save on computing time. The code is shown below.
+
+<<ensembles-bagging-spam, cache=TRUE>>=
+library(rpart)
+
+B <- 500  # number of trees in ensemble
+ctrl <- rpart.control(minsplit = 2, cp = 0, xval = 0)
+N <- nrow(spam.trn)  # number of training observations
+spam.bag <- vector("list", length = B)  # to store trees
+set.seed(900)  # for reproducibility
+for (b in seq_len(B)) {
+  boot.id <- sample.int(N, size = N, replace = TRUE)
+  boot.df <- spam.trn[boot.id, ]  # bootstrap sample
+  spam.bag[[b]] <- rpart(type ~ ., data = boot.df, control = ctrl)
+}
+@
+
+<<ensembles-bagging-spam-performance-hide, cache=TRUE, echo=FALSE>>=
+vote <- function(x) names(which.max(table(x)))
+err <- function(pred, obs) 1 - sum(diag(table(pred, obs))) / 
+  length(obs) 
+
+# Obtain (N x B) matrix of individual tree predictions
+spam.bag.preds <- sapply(spam.bag, FUN = function(tree) {
+  predict(tree, newdata = spam.tst, type = "class")
+})
+
+# Compute test error as a function of number of trees
+spam.bag.err <- sapply(seq_len(B), FUN = function(b) {
+  agg.pred <- apply(spam.bag.preds[, seq_len(b), drop = FALSE], 
+                    MARGIN = 1, FUN = vote)
+  err(agg.pred, obs = spam.tst$type)
+})
+# min(spam.bag.err)  # minimum misclassification error
+@
+
+<<ensembles-spam-tree, echo=FALSE, cache=TRUE>>=
+# FIXME: Ideally, this tree would've been fit in the CART chapter and referenced here.
+set.seed(1023)  # for reproduicbility
+spam.tree <- rpart(type ~ ., data = spam.trn, cp = 0)
+spam.tree <- treemisc::prune_se(spam.tree, se = 1)
+spam.tree.preds <- predict(spam.tree, newdata = spam.tst, type = "class")
+spam.tree.err <- err(spam.tree.preds, obs = spam.tst$type)
+@
+
+Now that we have the individual trees, each of which was fit to a different bootstrap sample from the training data, we can obtain predictions and assess the performance of the ensemble using the test sample.  To that end, we'll loop through each tree to obtain predictions on the test set (\code{spam.tst}), and store the results in an $N \times B$ matrix, one column for each tree in the ensemble. We then compute the test error as a function of $B$ by cumulatively aggregating the predictions from trees $1$--$B$ by means of voting (e.g., if we are computing the bagged prediction using only the first three trees, the final prediction for each row will simply be the the class with the most votes across the three trees). To help with the computations, we'll write two small helper functions, \code{vote()} and \code{err()}, for carrying out the voting and computing the misclassification error, respectively:
+
+<<ensembles-bagging-spam-performance, eval=FALSE>>=
+vote <- function(x) names(which.max(table(x)))
+err <- function(pred, obs) 1 - sum(diag(table(pred, obs))) / 
+  length(obs) 
+
+# Obtain (N x B) matrix of individual tree predictions
+spam.bag.preds <- sapply(spam.bag, FUN = function(tree) {
+  predict(tree, newdata = spam.tst, type = "class")
+})
+
+# Compute test error as a function of number of trees
+spam.bag.err <- sapply(seq_len(B), FUN = function(b) {
+  agg.pred <- apply(spam.bag.preds[, seq_len(b), drop = FALSE], 
+                    MARGIN = 1, FUN = vote)
+  err(agg.pred, obs = spam.tst$type)
+})
+min(spam.bag.err)  # minimum misclassification error
+
+#> [1] 0.0485
+@
+
+The results are displayed in Figure~\ref{fig:ensembles-bagging-spam-error}. The error stabilizes after around 200 trees and achieves a minimum misclassification error rate of \Sexpr{round(min(spam.bag.err) * 100, digits = 2)}\% (horizontal dashed line). For reference, a single tree (pruned using the 1-SE rule) achieved a test error of \Sexpr{round(min(spam.tree.err) * 100, digits = 2)}\%. Averaging the predictions from several hundred overgrown trees cut the misclassification error by more than half! 
+
+<<ensembles-bagging-spam-error, echo=FALSE, par=TRUE, fig.cap=paste0("Test misclassification error for the email spam bagging example. The error stabilizes after around 200 trees and achieves a minimum misclassification error rate of ", round(min(spam.bag.err) * 100, digits = 2), "\\% (horizontal dashed line).")>>=
+palette("Okabe-Ito")
+plot(spam.bag.err, type = "l", xlab = "Number of trees", 
+     ylab = "Test error", col = 1)
+abline(h = min(spam.bag.err), lty = 2, col = 3)
+palette("default")
+@
+
+While bagging was quite successful in the email spam example, sometimes bagging can make things worse. For a good discussion on how bagging can worsen bias and/or variance, see \citet[Sec.~4.5.2--4.5.3]{berk-statistical-2008}.
+
+
+%-------------------------------------------------------------------------------
+\subsection{Sampling without replacement \label{sec:ensembles-bagging-subsampling}}
+%-------------------------------------------------------------------------------
+
+<<ensembles-bagging-spam-subsample, cache=TRUE, echo=FALSE>>=
+B <- 500  # number of trees in ensemble
+ctrl <- rpart.control(minsplit = 2, cp = 0, xval = 0)
+N <- nrow(spam.trn)  # number of training observations
+spam.bag.sub <- vector("list", length = B)
+set.seed(900)  # for reproducibility
+for (b in seq_len(B)) {
+  boot.id <- sample.int(N, size = floor(N / 2), replace = FALSE)  # only change required
+  boot.df <- spam.trn[boot.id, ]  # bootstrap sample
+  spam.bag.sub[[b]] <- rpart(type ~ ., data = boot.df, control = ctrl)
+}
+
+# Helper functions
+vote <- function(x) names(which.max(table(x)))
+err <- function(pred, obs) 1 - sum(diag(table(pred, obs))) / length(obs) 
+
+# Obtain (N x B) matrix of un-aggregated predictions
+spam.bag.sub.preds <- sapply(spam.bag.sub, FUN = function(tree) {
+  predict(tree, newdata = spam.tst, type = "class")
+})
+
+# Compute test error as a function of number of trees
+spam.bag.sub.err <- sapply(seq_len(B), FUN = function(b) {
+  agg.pred <- apply(spam.bag.sub.preds[, seq_len(b), drop = FALSE], 
+                    MARGIN = 1, FUN = vote)
+  err(agg.pred, obs = spam.tst$type)
+})
+# min(spam.bag.sub.err)  # minimum misclassification error
+@
+
+Inducing trees from learning sets that are bootstrap samples from the original training data imitates the process of building trees on independent samples of size $N$ from the same underlying population. While bagging traditionally utilizes bootstrap sampling (i.e., sampling with replacement) for training the individual base learners, it can sometimes be advantageous to use subsampling without replacement; \citet{breiman-1999-pasting} referred to this as \emph{pasting}. In particular, if $N$ is "large enough", then bagging using random subsamples of size $N / 2$ (i.e., sampling without replacement) can be an effective alternative to bagging based on the bootstrap \citep{friedman-2007-bagging}. \citet{strobl-2007-bias} suggest using a subsample size of 0.632 times the original sample size $N$---because in bootstrap sampling (i.e., sampling with replacement) about 63.2\% of the original observations end up in any particular bootstrap sample.This is quite fortunate since sampling half the data without replacement is much more efficient and can dramatically speed up the bagging process. Applying this to the email spam data from the previous section, which only required modifying one line of code in the previous example, resulted in a minimum test error of \Sexpr{round(min(spam.bag.sub.err) * 100, digits = 2)}\%, quite comparable to the previous results using the bootstrap, but much faster to train. 
+
+Another reason why subsampling can sometimes improve the performance of bagging is through "de-correlation". Recall that bagging can improve the performance of unstable learners through variance reduction. As discussed in more detail in Section~\ref{sec:rf-algorithm}, correlation limits the variance-reducing effect of averaging. The problem here is that the trees in a bagged ensemble will often be correlated since they are all induced off of bootstrap samples from the same training set (i.e., they will share similar splits and structure, to some degree). Using subsamples of size $N / 2$ will help to de-correlate the trees which can further reduce variance, resulting in improved generalization performance. A more effective strategy to de-correlate trees in a bagged ensemble is discussed in Section~\ref{sec:rf-algorithm}.
+
+
+%-------------------------------------------------------------------------------
+\subsection{Hyperparameters and tuning}
+%-------------------------------------------------------------------------------
+
+Bagged tree ensembles are convenient because they don't require much tuning. That's not to say that you can't improve performance by tuning some of the tree parameters (e.g., tree depth). However, in contrast to gradient tree boosting (Chapter~\ref{chap:gbm}), increasing the number of trees ($B$) does not necessarily lead to overfitting (see Figure~\ref{fig:ensembles-spam-results}), and isn't really a tuning parameter---although, computation time increases with $B$, so it can be advantageous to monitor performance on a validation set to determine when performance has plateaued or reached a point of diminishing return.%; in Section~\ref{sec:rf-oob}, I'll introduce a way to internally keep track of out-of-sample validation performance, essentially for free, that can generally be used with ensembles that employ random sampling. 
+
+
+%-------------------------------------------------------------------------------
+\subsection{Software \label{sec:ensembles-bagging-software}}
+%-------------------------------------------------------------------------------
+
+Bagging is rather straightforward to implement directly, as seen in this chapter. Nonetheless, several \R{} packages exist which can be used to implement Algorithm~\ref{alg:ensembles-bagging}. The \R{} package \pkg{ipred} \citep{R-ipred}, which stands for \strong{i}mproved \strong{pred}ictors, implements bagged decision trees using the \pkg{rpart} package and supports classification, regression, and survival problems. Package \pkg{adabag} \citep{R-adabag} also implements bagging via \pkg{rpart}, but only supports classification problems. In \Python{}, bagging is implemented in scikit-learn's \pkg{sklearn.ensemble} module and can be applied to any base estimator (i.e., not just decision trees). 
+
+\FIXME{Reword or omit?}
+In general, I think it's more efficient to use random forest software to implement bagging, especially in \R{}. This is because random forest software typically builds the entire ensemble using highly efficient and compiled code, whereas \pkg{ipred} utilizes existing tree software and builds the ensemble in a way similar to what we did in the email spam example. A regression example is given in Section~\ref{sec:ensembles-isle}. Random forests are discussed in Chapter~\ref{chap:rf}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Boosting\label{sec:ensembles-boosting}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Adaboost increases weights on previously misclassified cases, allowing each successive fit to focus on the harder cases. See page 29 and on in \url{https://www.stat.berkeley.edu/~breiman/wald2002-1.pdf} for some background points on Adaboost.
+
+Recall that bagging reduces variance by averaging several unstable learners together. Boosting, on the other hand, was originally devised for binary classification problems as a way to boost the performance of \emph{weak learners}---a model that only does slightly better than the \emph{majority vote classifier} (i.e., a model that always predicts the majority class in the learning sample). So how does boosting improve the performance of a weak learner? The basic idea is quite intuitive: fit models in a sequential manner, where each model in the sequence is fit on a resampled version of the training data that gives more weight to the observations that were previously misclassified, hence, "boosting" the performance of the previous models. Each successive model in a boosting sequence effectively hones in the parts of the data with the largest error. 
+
+Several different flavors of boosting exist, and the procedure has evolved quite a bit since it's initial inception for binary classification in \citet{freund-1996-experiments}. In the following section, we'll discuss one of the earliest and most popular flavors of boosting for binary classification: \emph{Adaboost.M1} \citep{freund-1996-experiments}. It's important to call out that Adaboost.M1, along with its many variants, assume that the base learners (in our case, binary classification trees) can incorporate case weights. A more general (and flexible) boosting strategy will be covered in Chapter~\ref{chap:gbm}.
+
+
+%-------------------------------------------------------------------------------
+\subsection{Adaboost.M1 for binary outcomes \label{sec:ensembles-adaboost}}
+%-------------------------------------------------------------------------------
+
+\FIXME{Add a brief explanation of $\sign()$ function, which returns the sign of its argument?}
+
+Adaboost.M1---also referred to as \emph{Discrete Adaboost} in \citet{friedman-2000-additive} due to the fact that the base learners each return a discrete class label---fits an \emph{additive model} of the form
+\begin{equation}
+\nonumber
+  C\left(\boldsymbol{x}\right) = \sign\left(\sum_{b = 1}^B \alpha_b C_b\left(\boldsymbol{x}\right)\right),
+\end{equation}
+where $\left\{\alpha_b\right\}_{b = 1} ^ B$ are coefficients that weight the contribution of each respective base learner $C_b\left(\boldsymbol{x}\right)$. In essence, classifiers in the sequence with higher accuracy receive more weight and therefore have more influence on the final classification $C\left(\boldsymbol{x}\right)$.
+
+%FIXME: Generalize and rephrase the following from Breiman's arcing paper:
+%What mainly differentiates the different boosting algorithms is their method of weighting training data. In Adaboost.M1, 
+The details of Adaboost.M1 are given in Algorithm~\ref{alg:ensembles-adaboost}. The crux of the idea is this: start with an initial classifier built from the training data using equal case weights $\left\{w_i = 1 / N\right\}_{i = 1} ^ N$. Next, increase $w_i$ for those cases that have been most frequently misclassified. The process is continued a fixed number of times ($B$). 
+
+\begin{algo}[!htb]
+
+\begin{enumerate}[label=\arabic*)]
+  
+  \item Initialize case weights $\left\{w_i = 1 / N\right\}_{i = 1} ^ N$.
+  
+  \item For $b = 1, 2, \dots, B$
+  
+  \begin{enumerate}[label=\alph*)]
+  
+    \item Fit a classifier $C_b\left(\boldsymbol{x}\right)$ to the training observations using weights $w_i$.
+    
+    \item Compute the weighted misclassification error
+    \begin{equation}
+    \nonumber
+      err_b = \frac{\sum_{i = 1}^N w_i I\left(y_i \ne C_b\left(\boldsymbol{x}\right)\right)}{\sum_{i = 1}^N}.
+    \end{equation}
+    
+    \item Compute $\alpha_b = \log\left(1 / err_b - 1\right)$.
+    
+    \item Update case weights: $w_i \leftarrow \exp\left[\alpha_b I\left(y_i \ne C_b\left(\boldsymbol{x}\right)\right)\right]$, $i = 1, 2, \dots, N$.
+  
+  \end{enumerate}
+  
+  \item Return weighted majority vote: $C\left(\boldsymbol{x}\right) =\sign\left(\sum_{b = 1}^B \alpha_b  C_b\left(\boldsymbol{x}\right)\right)$
+
+\end{enumerate}
+
+\caption{Vanilla Adaboost.M1 algorithm for binary classification. \label{alg:ensembles-adaboost}}
+
+\end{algo}
+
+Like bagging, boosting is a \emph{meta-algorithm} that can be applied to any type of model, but it's often most successfully applied to shallow decision trees (i.e., decision trees with relatively few splits/terminal nodes). While bagging uses overgrown trees (high variance) as the weak learners, boosting tends to benefit from using small trees (high bias), like decision stumps, as the weak learners. In the next section, we'll code up Algorithm~\ref{alg:ensembles-adaboost} and apply it to the email spam data for comparison with the previously obtained bagged tree ensemble.
+
+\FIXME{Would be helpful to describe how case weights are used in construcing a CART-like decision tree. I think it's used as case multiplers when computing the splits and impurity values. Can look at rpart's C code.}
+
+While Adaboost.M1 was one of the most accurate classifiers at the time\footnote{In fact, shortly after its introduction, Leo Breiman referred to Adaboost as the "...best off-the-shelf classifier in the world."}, the fact that it only produced a classification was a severe limitation. To that end, \citet{friedman-2000-additive} generalized the Adaboost.M1 algorithm so that the weak learners return a class probability estimate, as opposed to a discrete class label; the contribution to the final classifier is half the logit-transform of this probability estimate. They refer to this procedure as \emph{Real Adaboost}. Other generalizations (e.g., to multi-class outcomes) also exist. In Chapter~\ref{chap:gbm}, we'll discuss a much more flexible flavor of boosting, called \emph{stochastic gradient tree boosting}, which can naturally handle general outcome types (e.g., continuous, binary, Poisson counts, censored, etc.).
+
+% Boosting seems to work well when we use a sequence of simple, low variance classifiers. Each stage makes a small, low variance step, sequentially chipping away at the bias.
+
+
+%-------------------------------------------------------------------------------
+\subsection{Boosting from scratch: classifying email spam \label{sec:ensembles-boosting-scratch}}
+%-------------------------------------------------------------------------------
+
+To illustrate, let's apply Adaboost.M1 (Algorithm~\ref{alg:ensembles-adaboost}) to the email spam data and show how it "boosts" the performance of an individual \pkg{rpart} tree. For this example, we'll use $B = 500$ depth-10 decision trees. Since Adaboost.M1 requires $y \in \left\{-1, +1\right\}$, we'll re-code the response (\code{type}) so that \code{type = "spam"} corresponds to $y = +1$.
+
+<<ensembles-spam-recode>>=
+spam.trn$type <- ifelse(spam.trn$type == "spam", 1, -1)
+spam.tst$type <- ifelse(spam.tst$type == "spam", 1, -1)
+spam.xtrn <- subset(spam.trn, select = -type)  # feature columns only
+spam.xtst <- subset(spam.tst, select = -type)  # feature columns only
+@
+
+Following the previous example, we'll use a simple \code{for} loop and list to sequentially construct and and store the fitted trees, respectively.. For Adaboost.M1, we also have to collect and store the $\left\{\alpha_b\right\}_{b = 1} ^ B$ coefficients in order to make predictions later. Note that \code{predict.rpart()} returns a factor---in this case, with factor levels \code{-1} and \code{1}---which needs to be coerced to numeric before further processing; this is the purpose of the \code{fac2num()} helper function in the code below\footnote{According to the \R{} FAQ guide (\url{https://cran.r-project.org/doc/FAQ/}), a more efficient, but harder to remember, solution is to use \code{as.numeric(levels(x))[as.integer(x)]}}.
+
+<<ensembles-Adaboost-spam, cache=TRUE>>=
+library(rpart)
+
+# Helper function to coerce factors to numeric
+fac2num <- function(x) as.numeric(as.character(x))
+
+# Apply Adaboost.M1 algorithm
+B <- 500  # number of trees in ensemble
+ctrl <- rpart.control(maxdepth = 10, xval = 0)
+N <- nrow(spam.trn)  # number of training observations
+w <- rep(1 / N, times = N)  # initialize weights
+spam.ada <- vector("list", length = B)  # to store sequence of trees
+alpha <- numeric(B)  # to hold coefficients
+for (i in seq_len(B)) {  # for b = 1, 2, ..., B
+  spam.ada[[i]] <- rpart(type ~ ., data = spam.trn, weights = w,
+                         control = ctrl, method = "class")
+  # Compute predictions and coerce factor output to +1/-1
+  pred <- fac2num(predict(spam.ada[[i]], type = "class"))
+  err <- sum(w * (pred != spam.trn$type)) / sum(w)  # weighted error
+  if (err == 0 | err == 1) {  # to avoid log(0) and dividing by 0
+    err <- (1 - err) * 1e-06 + err * 0.999999
+  }
+  alpha[i] <- log((1 / err) - 1)  # coefficient from step 2) (c)
+  w <- w * exp(alpha[i] * (pred != spam.trn$type))  # update weights
+}
+@
+
+<<ensembles-Adaboost-spam-performance-hide, echo=FALSE, cache=TRUE>>=
+err <- function(pred, obs) 1 - sum(diag(table(pred, obs))) / 
+  length(obs) 
+
+spam.ada.preds <- sapply(seq_len(B), FUN = function(i) {
+  class.labels <- predict(spam.ada[[i]], newdata = spam.tst, type = "class")
+  alpha[i] * fac2num(class.labels)
+})  # (N x B) matrix of un-aggregated predictions
+
+# Compute test error as a function of number of trees
+spam.ada.err <- sapply(seq_len(B), FUN = function(b) {
+  agg.pred <- apply(spam.ada.preds[, seq_len(b), drop = FALSE], 
+                    MARGIN = 1, FUN = function(x) sign(sum(x)))
+  err(agg.pred, obs = spam.tst$type)
+})
+@
+
+Next, we'll generate predictions for the test data (\code{spam.tst}) using the first $b$ trees (where $b$ will be varied over the range $1, 2, \dots, B$) and compute the misclassification error for each; note the we're using the \code{err()} function defined in the previous example. The results are plotted in Figure~\ref{fig:ensembles-spam-results-hide}, along with those from the previously obtained bagged tree ensembles (i.e., using sampling with/without replacement). The minimum test error from the Adaboost.M1 ensemble is \Sexpr{round(min(spam.ada.err), digits = 3)}. Compare this to the bagged tree ensemble based on sampling with replacement, which achieved a minimum test error of \Sexpr{round(min(spam.bag.err), digits = 3)}. In this case, Adaboost.M1 slightly outperforms bagging.
+
+<<ensembles-Adaboost-spam-performance, eval=FALSE>>=
+spam.ada.preds <- sapply(seq_len(B), FUN = function(i) {
+  class.labels <- predict(spam.ada[[i]], newdata = spam.tst, 
+                          type = "class")
+  alpha[i] * fac2num(class.labels)
+})  # (N x B) matrix of un-aggregated predictions
+
+# Compute test error as a function of number of trees
+spam.ada.err <- sapply(seq_len(B), FUN = function(b) {
+  agg.pred <- apply(spam.ada.preds[, seq_len(b), drop = FALSE], 
+                    MARGIN = 1, FUN = function(x) sign(sum(x)))
+  err(agg.pred, obs = spam.tst$type)
+})
+min(spam.ada.err)  # minimum misclassification error
+@
+
+For comparison, let's see how a single depth-10 decision tree---the base learner for our Adaboost.M1 ensemble---performs on the same data.
+
+<<ensembles-spam-tree-10, cache=TRUE>>=
+spam.tree.10 <- rpart(type ~ ., data = spam.trn, 
+                      maxdepth = 10, method = "class")
+pred <- predict(spam.tree.10, newdata = spam.tst, type = "class")
+pred <- as.numeric(as.character(pred))  # coerce to numeric
+mean(pred != spam.tst$type)
+@
+
+Wow, boosting decreased the misclassification error of a single tree by roughly \Sexpr{round((1 - min(spam.ada.err) / mean(pred != spam.tst$type)) * 100, digits = 2)}\%, nice!
+
+<<ensembles-spam-results-hide, echo=FALSE, par=TRUE, fig.cap="Misclassification error on the email spam test set from several different tree ensembles: 1) an Adaboost.M1 classifier with depth-10 classification trees (black curve), 2) a bagged tree ensemble using max depth trees and sampling with replacement (yellow curve), and 3) a bagged tree ensemble using max depth trees and subsampling with replacement (blue curve). The horizontal dashed lines represent the minimum test error obtained by each ensemble.">>=
+# Plot train and test errors as a function of the number of trees
+palette("Okabe-Ito")  # colorblind friendly palette
+plot(spam.ada.err, col = 1, type = "l", las = 1, 
+     xlab = "Number of trees", ylab = "Misclassification error")
+lines(spam.bag.err, col = 2)
+lines(spam.bag.sub.err, col = 3)
+abline(h = min(spam.ada.err), col = 1, lty = 2)
+abline(h = min(spam.bag.err), col = 2, lty = 2)
+abline(h = min(spam.bag.sub.err), col = 3, lty = 2)
+legend("topright", legend = c("Adaboost.M1", "Bagging", "Bagging (N/2)"), 
+       lty = 1, col = c(1, 2, 3), inset = 0.01, bty = "n")
+palette("default")
+@
+
+
+%-------------------------------------------------------------------------------
+\subsection{Tuning}
+%-------------------------------------------------------------------------------
+
+In contrast to bagging, the number of base learners is often a critical tuning parameter in boosting algorithms, as they can often overfit for large enough $B$. While Figure~\ref{fig:ensembles-spam-results-hide} doesn't give any indication of overfitting, Adaboost.M1 (and any boosting algorithm) can certainly overfit; an example of overfitting with Adaboost is given in \citet[p.~616; Figure~16.5]{hastie-2009-elements}. The performance of a boosted tree ensemble can also be sensitive to the tree-specific parameters, such as the tree depth or maximum number of terminal nodes. Further refinements to Adaboost, like the addition of \emph{shrinkage} and subsampling, introduce other important tuning parameters. These are discussed in more detail in Section~\ref{sec:gbm-tuning}.
+
+
+%-------------------------------------------------------------------------------
+\subsubsection{Forward stagewise additive modeling and exponential loss \label{sec:ensembles-fsam}}
+%-------------------------------------------------------------------------------
+
+Additive expansions like \eqref{eqn:ensembles-ensemble} are often fit by minimizing some \emph{loss function}, like \emph{least squares} loss,
+\begin{equation}
+\nonumber
+  \min_{\left\{\beta_b, \theta_b\right\}_{b = 1}^B} \sum_{i = 1}^N L\left(y_i, \sum_{b = 1}^B \beta_b f_b\left(\boldsymbol{x}_i; \theta_b\right)\right).
+\end{equation}
+For many combinations of loss and basis learners, the solution can involve complicated and expensive numerical techniques. Fortunately, a simple approximation can often be used when it is more feasible to solve the optimization problem for a single base learner. This approximate solution is called \emph{stagewise additive modeling}, the details of which are listed in Algorithm~\ref{alg:ensembles-stagewise} below.
+
+\begin{algo}[!htb]
+
+\begin{enumerate}[label=\arabic*)]
+
+  \item Initialize $f_b\left(\boldsymbol{x}_i; \theta_b\right) = 0$ (a constant).
+
+  \item For $b = 1, 2, \dots, B$
+
+  \begin{enumerate}[label=\alph*)]
+
+    \item Optimize the loss for a single basis function; in particular, solve
+    \begin{equation}
+    \nonumber
+      \left(\beta_b, \theta_b\right) = \argmin_{\beta_b, \theta_b} \sum_{i = 1}^N L\left(y_i, \beta f_{b - 1}\left(\boldsymbol{x}_i\right) + \beta f\left(\boldsymbol{x}_i; \theta_b\right)\right).
+    \end{equation}
+
+    \item Set $f_b\left(x\right) = f_{b - 1}\left(\boldsymbol{x}_i\right) + \beta_b f\left(\boldsymbol{x}_i\right)$.
+
+  \end{enumerate}
+
+\end{enumerate}
+
+\caption{Stagewise additive modeling \label{alg:ensembles-stagewise}}
+
+\end{algo}
+
+\citet{friedman-2000-additive} show that Adaboost.M1 (Algorithm~\ref{alg:ensembles-adaboost}) is equivalent to \emph{forward stagewise additive modeling} using the exponential loss function
+\begin{equation}
+\label{eqn:ensembles-loss-exponential}
+  L\left(y, f\left(\boldsymbol{x}\right)\right) = \exp\left(-y f\left(\boldsymbol{x}\right)\right).
+\end{equation}
+The product $y f\left(\boldsymbol{x}\right)$ is referred to as the "margin" and is analogous to the residual, $y - f\left(\boldsymbol{x}\right)$, for continuous outcomes. Hence, Adaboost.M1 can be derived in an equivalent way that conforms to exactly the same structure as \eqref{eqn:ensembles-ensemble}. The boosting procedure discussed in Chapter~\ref{chap:gbm} follows the forwards stagewise fitting approach more explicitly and includes Adaboost as a special case, so more on this later. The \pkg{gbm} package \citep{R-gbm} (originally by Greg Ridgeway) in \R{} implements Adaboost.M1 via this approach.
+
+
+%-------------------------------------------------------------------------------
+\subsection{Software}
+%-------------------------------------------------------------------------------
+
+\FIXME{SHould add references to the other Adaboost implementations, Adaboost.SAMME.}
+
+Different flavors of Adaboost (e.g., Discrete Adaboost, Real Adaboost, and Gentle Adaboost) are available in the \R{} package \pkg{ada} \citep{R-ada}; Adaboost.M1 and Adaboost.SAMME are also implemented in the \R{} package \pkg{adabag}, as well as scikit-learn's \pkg{sklearn.ensemble} module. While \R{}'s implementations utilize CART-like decision trees for the base learner (using \pkg{rpart}), scikit-learn's implementation allows you to use any compatible scikit-learn model that supports case weights. As mentioned in the previous section, the \R{} package \pkg{gbm} implements Adaboost.M1 as a forward stagewise additive model; more on \pkg{gbm} in Chapter~\ref{chap:gbm}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Variable importance \label{sec:ensembles-importance}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\FIXME{Technically, the VI scores from CART typically involve surrogate and competing splits. Check Loh's VI paper.}
+
+Recall from Section~\ref{sec:brpart-importance} that the relative importance of predictor $X$ is essentially the sum of the squared improvements over all internal nodes of the tree for which $X$ was chosen as the partitioning variable. This idea also extends to ensembles of decision trees, such as bagged and boosted tree ensembles. In ensembles, the improvement score for each predictor is averaged across all the trees in the ensemble. Because of the stabilizing effect of averaging, the aggregated tree-based variable importance score is often more reliable in large ensembles; see
+\citet[p. 368]{hastie-2009-elements}. Although, as we'll see in Chapter~\ref{chap:rf}, the split variable selection bias will also effect the variable importance scores often produced by tree-based ensembles using CART-like decision trees.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Which ensemble method should you use with trees?}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+There is no free lunch in SML. Among tree-based ensembles, it is generally regarded that boosting outperforms bagging (and its variants, like the random forest procedure discussed in Chapter~\ref{chap:rf}). However, this is not always the case and, as discussed briefly in this chapter and in Chapter~\ref{chap:gbm}, boosting tends to require more work up front in terms of tuning in order to see the gains, whereas bagged tree ensembles tend to perform well\footnote{By "well" here, I mean close to how well they would perform with optimal tuning; the default is usually "in the ballpark".} right out of the box with little to no tuning; this is especially true for random forests. My opinion is summarized by the following relationship:
+\begin{equation}
+\nonumber
+\text{Gradient boosted trees} \ge \text{Random forest} > \text{Bagged trees} > \text{Single tree}.
+\end{equation}
+So while boosted tree ensembles tend to outperform their bagged counterparts, I don't often find the performance increase to be worth the added complexity and time associated with tuning. It's a trade off that we all must take into consideration for the problem at hand. It should also be noted that sometimes a single decision tree is the right tool for the job, and an ensemble thereof would be overkill; see, for example, Section~\ref{sec:rf-ex-mushroom}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Importance sampled learning ensembles \label{sec:ensembles-isle}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\FIXME{Need to discuss $\sigma$.}
+
+Tree-based ensembles (especially those discussed in the next two chapters) often do a good job in building a prediction model, but at the end of the day can involve a lot of trees which can limit their use in production since it can require more memory and take longer to score new data sets. 
+
+To help overcome these issues, \citet{friedman-2003-isle} introduced the concept of \emph{importance sampled learning ensembles} (ISLEs). Many of the tree-based ensembles discussed in this book---including bagged tree ensembles---are examples of ISLEs. The main point here is that ISLEs can sometimes benefit from post-processing via a technique called the LASSO, which stands for \emph{least absolute shrinkage and selection operator} \citep{tibshirani-1996-lasso}. Such post-processing can often maintain or, in some cases, improve the accuracy of the original ensemble while dramatically improving computational performance (e.g., lower memory requirements and faster training times). For full details, see \citet{friedman-2003-isle}, \citet[Sec.~16.3.1]{hastie-2009-elements}, and \citet[346--347]{efron-2016-computer}.
+
+The idea is to use the LASSO to select a subset of trees from a fitted ensemble and re-weight them, which can result in an ensemble with far fewer trees and (hopefully) comparable, if not better, accuracy. This is important to consider in real applications since tree ensembles can sometimes require many thousands of decision trees to reach peak performance, often resulting in a large model to maintain in memory and slower scoring times (aspects that are important to consider before deploying a model in a production process).
+
+The LASSO-based post-processing procedure essentially involves fitting an $L_1$-penalized regression model of the form
+\begin{equation}
+\nonumber
+  \min_{\left\{\beta_b\right\}_{b = 1}^B} \sum_{i = 1}^N L\left[y_i, \sum_{b = 1}^B \widehat{f}_b\left(\boldsymbol{x}_i\right) \beta_b\right] + \lambda\sum_{b = 1}^B \left\lvert \beta_b \right\rvert,
+\end{equation}
+where $\widehat{f}_b\left(\boldsymbol{x}_i\right)$ ($b = 1, 2, \dots, B$) is the prediction(s) from the $b$-th tree for observation $i$, $\beta_b$ are fixed, but unknown coefficients to be estimated via the LASSO, and $\lambda$ is the $L_1$-penalty to be applied. The wonderful and efficient \pkg{glmnet} package \citep{R-glmnet} for \R{} can be used to fit the entire LASSO regularization path\footnote{The \pkg{glmnet} package actually implements the entire \emph{elastic-net} regularization path for many types of generalized linear models. The LASSO is just a special case of the elastic net, which combines both the LASSO and ridge (i.e., $L_2$) penalties.}; that is, computes the estimated coefficients for a grid of relevant $\lambda$ values, which can be chosen via cross-validation, or an independent test set.
+
+Note that not all ensembles will perform well with post-processing. As discussed in \citet[section~16.3.1]{hastie-2009-elements}, the individual trees should cover the space of predictors where needed and and be sufficiently different from each other for the post-processor to be effective. Strategies for different tree ensembles are provided in \citet{friedman-2003-isle} (e.g., using smaller subsamples when sampling without replacement, like 5--10\%, and shallower trees for bagged tree ensembles).
+
+To illustrate, let's return to the Ames housing example. Below, we'll load in the data and split it into the same train/test sets we've been using throughout this book. Note that we rescale \code{Sale\_Price} by dividing by 1000; this is strictly for plotting purposes.
+
+<<ensembles-isle-ames>>=
+ames <- as.data.frame(AmesHousing::make_ames())
+ames$Sale_Price <- ames$Sale_Price / 1000  # rescale response
+set.seed(4919)  # for reproducibility
+id <- sample.int(nrow(ames), size = floor(0.7 * nrow(ames)))
+ames.trn <- ames[id, ]
+ames.tst <- ames[-id, ]
+ames.xtst <- subset(ames.tst, select = -Sale_Price)  # features only
+@
+
+Next, we'll fit a bagged tree ensemble using the \pkg{randomForest} package \citep{R-randomForest} (computational reasons for doing so are discussed in Section~\ref{sec:ensembles-bagging-software}). Random forest, and its \opensource{} implementations, are not discussed until Chapter~\ref{chap:rf}. For now, just note that the \pkg{randomForest} package, among others, can be used to implement bagged tree ensembles by tweaking a special parameter, often referred to as $m_{try}$ (to be discussed in Section~\ref{sec:rf-mtry}), and setting this parameter equal to the number of total predictors will result in an ordinary bagged tree ensemble). This will be much more efficient than relying on package \pkg{ipred} and will also allows us to obtain predictions from the individual trees, rather than just the aggregated predictions. An example of post-processing a boosted tree ensemble is given in Section~\ref{sec:gbm-example-isle-als}.
+
+Here we fit two models, each containing $B = 500$ trees: 1) a standard bagged tree ensemble where each tree is fully grown to bootstrap samples of size $N$ (\code{ames.bag}) and 2) a bagged tree ensemble consisting of shallow six-node trees, each of which is grown using only a 5\% sample of the training data without replacement (\code{ames.bag.6.5}). Although substantially less accurate (see Figure~\ref{fig:ensembles-isle-ames-bagger-results}), notice how much faster it is to train \code{ames.bag.6.5}!
+
+<<ensembles-isle-ames-bagger, cache=TRUE>>=
+library(randomForest)
+
+# Fit a typical bagged tree ensemble 
+system.time({
+  set.seed(942)  # for reproducibility
+  ames.bag <- 
+    randomForest(Sale_Price ~ ., data = ames.trn, mtry = 80, 
+                 ntree = 500, xtest = ames.xtst, 
+                 ytest = ames.tst$Sale_Price, keep.forest = TRUE)
+})
+
+# Fit a bagged tree ensemble using six-node trees on 5% samples
+system.time({
+  set.seed(1021)
+  ames.bag.6.5 <- 
+    randomForest(Sale_Price ~ ., data = ames.trn, mtry = 80, 
+                 ntree = 500, maxnodes = 6, 
+                 sampsize = floor(0.05 * nrow(ames.trn)),
+                 replace = FALSE, keep.forest = TRUE,
+                 xtest = ames.xtst, ytest = ames.tst$Sale_Price)
+})
+
+# Test set MSE as a function of the number of trees
+mse.bag <- ames.bag$test$mse
+mse.bag.6.5 <- ames.bag.6.5$test$mse
+@
+
+<<ensembles-isle-ames-bagger-save, echo=FALSE>>=
+saveRDS(ames.bag, file = "../data/chap-ensembles-ames-bag.rds")
+@
+
+Next, we introduce a new \pkg{treemisc} function, called \code{isle.post()}, that will post-process the individual tree predictions using the LASSO, as implemented via the \pkg{glmnet} package; for details, see the function's help page: \code{?treemisc::isle.post}. Note that the \code{isle.post()} function, unless otherwise specified, uses \pkg{glmnet}'s default performance metric, which corresponds to MSE whenever \code{family = "gaussian"}. A printout of internal code for \code{treemisc::isle.post()} is given below:
+
+<<ensembles-isle-post, size="scriptsize", linewidth=90, truncate=FALSE>>=
+treemisc::isle.post
+@
+
+In the next code chunk, we use the \code{isle.post()} function to fit the entire regularization path for each ensemble, which gives us the test MSE as a function of the number of trees (i.e., non-zero coefficients in the LASSO model):
+
+<<ensembles-isle-ames-bagger-post, cache=TRUE>>=
+library(treemisc)
+
+# Post-process ames.bag ensemble
+preds.trn <- predict(ames.bag, newdata = ames.trn, 
+                     predict.all = TRUE)$individual
+preds.tst <- predict(ames.bag, newdata = ames.tst, 
+                     predict.all = TRUE)$individual
+ames.bag.post <- 
+  isle.post(preds.trn, y = ames.trn$Sale_Price, 
+            family = "gaussian", newX = preds.tst, 
+            newy = ames.tst$Sale_Price)
+
+# Post-process ames.bag.6.5 ensemble
+preds.trn.6.5 <- predict(ames.bag.6.5, newdata = ames.trn, 
+                         predict.all = TRUE)$individual
+preds.tst.6.5 <- predict(ames.bag.6.5, newdata = ames.tst, 
+                         predict.all = TRUE)$individual
+ames.bag.6.5.post <- 
+  isle.post(preds.trn.6.5, y = ames.trn$Sale_Price, 
+            family = "gaussian", newX = preds.tst.6.5, 
+            newy = ames.tst$Sale_Price)
+@
+
+<<ensembles-isle-ames-bagger-post-results>>=
+z <- ames.bag.6.5.post$results
+z <- z[which.min(z$mse), ]
+@
+
+Figure~\ref{fig:ensembles-isle-ames-bagger-post-path} shows the profiles of the LASSO coefficients from the post-processed \code{ames.bag.6.5} model as the regularization parameter $\lambda$ is varied. The top axis indicates the number of non-zero coefficients at a particular value of $\\lambda$ (plotted on the log scale). Here you can see that for larger values of $\lambda$, many of the coefficients (i.e., trees) are zeroed out, resulting in a more parsimonious model. Cross-validation or a separate validation set can be used to choose the optimal value of $\lambda$; in our example, we supplied a test set whose minimum error corresponds to $\lambda_{min} = $ \Sexpr{round(z$lambda, digits = 3)} (vertical dashed line), or \Sexpr{z$ntree} non-zero coefficients.
+
+<<ensembles-isle-ames-bagger-post-path, cache=TRUE, echo=FALSE, fig.cap="Profiles of LASSO coefficients, as the regularization parameter $\\lambda$ is varied. The top axis indicates the number of non-zero coefficients at a particular value of $\\lambda$ (plotted on the log scale). The vertical dashed line corresponds to the optimal value of $\\lambda$ based on the test MSE.">>=
+par(mar = c(4, 4, 3, 0.1))
+plot(ames.bag.6.5.post$lasso.fit, xvar = "lambda",
+     col = adjustcolor("purple", alpha.f = 0.3), las = 1)
+abline(v = log(z$lambda), lty = 2)
+@
+
+Finally, we plot the post-processing results from each ensemble, which are shown in Figure~\ref{fig:ensembles-isle-ames-bagger-results}. Here we show the MSE as a function of the number of trees from each model (or non-zero coefficients in the LASSO). In this example, the simpler \code{ames.bag.6.5} ensemble benefits substantially from post-processing and appears to perform on par with the ordinary bagged tree ensemble (\code{ames.bag}) in terms of MSE, while requiring only a small fraction of trees and being orders of magnitude faster to train! The original ensemble (\code{ames.bag}) did not see nearly as much improvement from post-processing.
+
+<<ensembles-isle-ames-bagger-results, echo=FALSE, par=TRUE, fig.cap="MSE for the test data from several bagged tree ensembles. The dashed lines correspond to the LASSO-based post-processed versions. Clearly, the \\code{ames.bag.6.5} ensemble benefits the most from post-processing, performing nearly on par with the standard bagged tree ensemble (\\code{ames.bag}).">>=
+palette("Okabe-Ito")
+plot(mse.bag, type = "l", las = 1, xlab = "Number of trees", 
+     ylim = c(range(mse.bag, mse.bag.6.5)), ylab = "Test MSE")
+lines(mse.bag.6.5, col = 2)
+lines(ames.bag.post$results, lty = 2)
+lines(ames.bag.6.5.post$results, col = 2, lty = 2)
+legend("topright", legend = c("ames.bag", "ames.bag (post)", 
+                              "ames.bag.6.5", "ames.bag.6.5 (post)"),
+       col = c(1, 1, 2, 2), lty = c(1, 2, 1, 2), bty = "n")
+palette("default")
+@
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Final thoughts}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\citet{loh-2014-fifty} compared the accuracy of single decision trees to tree ensembles using both real and simulated data sets. He found that, on average, the best single-tree algorithm was about 10\% less accurate than that of a tree ensemble. In fact, tree ensembles will not always outperform a simpler individual tree \citep{loh-2009-guide-class}. These points aside, tree ensembles are a powerful class of models that are highly competitive in terms of state-of-the-art prediction accuracy. Chapters \ref{chap:rf}--\ref{chap:gbm} are devoted to two powerful tree ensemble techniques.
+
+It is also worth pointing out that while tree-based ensembles provide competitive accuracy on tabular data sets, they are less interpretable compared to a single decision tree, hence, they are often referred to as "black-box" models. Fortunately, post-hoc procedures exist that can help us peek into the black-box to understand the relationships uncovered by the model and explain their output to others. This is the topic of Chapter~\ref{chap:interpret}.
+
+
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% \section{Exercises}
+% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 
+% \begin{ExerciseList}
+% 
+%   \Exercise \label{ex:ensembles-ipred} Refit the bagged tree ensemble for the email spam data using the \pkg{ipred} package in \R{}; see \code{?ipred::bagging} for details and be sure to set the parameters so that it's comparable to the solution we obtained by hand. Are the results comparable? Read about the \code{coob} argument in the documentation. Re-run your analysis by calling \code{bagging()} with \code{coob = TRUE}. Does the error estimate from this option coincide with the test error you obtained? The concept of \emph{out-of-bag} error estimates is discussed in Section~\ref{sec:rf-oob}. 
+%   
+%   \Exercise \label{ex:ensembles-bagging-parallel} \R{} provides a packages that support parallel computing (e.g., \R{}'s built-in \pkg{parallel} package, or external packages like \pkg{foreach}\citet{R-foreach}, along with the many parallel backends it supprts, and \pkg{future} \citep{R-future}). For an extensive list of useful packages, visit the \emph{High-Performance and Parallel Computing with R} at \url{https://cran.r-project.org/web/views/HighPerformanceComputing.html}. Using a parallel framework of your choice, parallelize the bagging code from the email spam example in Section~\ref{sec:ensembles-bagging-scratch}. If you'd like to keep the simple \code{for} loop structure, then look into the \pkg{foreach} package with a suitable parallel backend like \pkg{doParallel} \citep{R-doParallel} (the \pkg{doParallel} vignette provides useful documentation and examples). Functions \code{mclapply()} (for unix-like users) and \code{parLapply()} from package \pkg{parallel}, which provide parallelized versions of \R{}'s \code{lapply()} function, could also be used (especially if you prefer the functional programming approach).
+%   
+%   \Exercise \label{ex:ensembles-isle-spam} Using the email spam data and the \pkg{randomForest} package, fit a standard bagged tree ensemble as well as a bagged tree ensemble comprised of shallow decision trees (e.g., \code{maxnodes = 6}) induced from smaller (i.e., 5--10\%) subsamples of the training data without replacement (similar to what we did in Section~\ref{sec:ensembles-isle}). Be sure to try different values for the \code{maxnodes} and \code{sampsize} arguments. Post-process each model using the LASSO and plot the misclassification accuracy from each as a function of the number of trees. Does post-processing with the LASSO appear to provide any benefit(s) in this example?
+%   
+%   \Exercise Try bagging a simple linear regression model. In particular, use the Ames housing training data with \code{Gr\_Liv\_Area} as the sole predictor; be sure to log-transform the response (\code{Sale\_Price}) prior to fitting. For this example, use $B = 500$. Does bagging seem to offer any improvement over a single simple linear regression model? Why or why not? Be sure to plot the data, along with the fitted regression lines from 1) the baseline model, 2) each bagged fit, and 3) the overall bagged prediction (for a total of 502 fitted regression lines). Average the coefficients (intercept and slope) across the bagged fits and compare to the coefficients from the original model. For linear models, is averaging the bagged coefficients equivalent to averaging the individual predictions (in terms of producing an overall bagged prediction)? Code for loading the data and producing the baseline model are given below.
+% 
+% <<ensembles-ex-bagging-ames-linear>>=
+% ames <- as.data.frame(AmesHousing::make_ames())
+% ames$Sale_Price <- ames$Sale_Price / 1000  # rescale response
+% set.seed(4919)
+% id <- sample.int(nrow(ames), size = floor(0.7 * nrow(ames)))
+% ames.trn <- ames[id, ]
+% ames.tst <- ames[-id, ]
+% 
+% # Baseline model
+% (ames.lm <- lm(log(Sale_Price) ~ Gr_Liv_Area, data = ames.trn))
+% @
+% 
+% <<ensembles-ex-bagging-ames-linear-solution, include=FALSE>>=
+% ames <- as.data.frame(AmesHousing::make_ames())
+% ames$Sale_Price <- ames$Sale_Price / 1000  # rescale response
+% set.seed(4919)
+% id <- sample.int(nrow(ames), size = floor(0.7 * nrow(ames)))
+% ames.trn <- ames[id, ]
+% ames.tst <- ames[-id, ]
+% 
+% # Baseline model
+% ames.lm <- lm(log(Sale_Price) ~ Gr_Liv_Area, data = ames.trn)
+% 
+% # Bagged models
+% B <- 500  # number of trees in ensemble
+% N <- nrow(ames.trn)  # number of training observations
+% ames.lm.bag <- vector("list", length = B)
+% set.seed(1356)  # for reproducibility
+% for (b in seq_len(B)) {
+%   boot.id <- sample.int(N, size = N, replace = TRUE)
+%   boot.df <- ames.trn[boot.id, ]  # bootstrap sample
+%   ames.lm.bag[[b]] <- lm(log(Sale_Price) ~ Gr_Liv_Area, data = boot.df)
+% }
+% 
+% # Predictions from bagged models
+% ames.lm.bag.preds <- sapply(ames.lm.bag, FUN = function(fit) {
+%   predict(fit, newdata = ames.tst)
+% })
+% 
+% # Averaged coefficients
+% (coefs <- rowMeans(sapply(ames.lm.bag, FUN = coef)))
+% 
+% # Compare coefficients
+% rbind("Bagging" = coefs, "Original" = coef(ames.lm))
+% 
+% # Plot results
+% palette("Okabe-Ito")
+% plot(log(Sale_Price) ~ Gr_Liv_Area, data = ames.trn, las = 1, 
+%      xlab = "log(Sale_Price / 1000)", col = adjustcolor(1, alpha.f = 0.3))
+% for (i in seq_along(ames.lm.bag)) {
+%   abline(ames.lm.bag[[i]], col = adjustcolor(2, alpha.f = 0.1))
+% }
+% abline(ames.lm, col = 3)
+% # yhat <- rowMeans(sapply(ames.lm.bag, FUN = function(fit) {
+% #   predict(fit, newdata = ames.trn)
+% # }))
+% # lines(ames.trn$Gr_Liv_Area, y = yhat, col = 4)
+% abline(coefs, col = 1)
+% palette("default")
+% @
+%   
+%   \Exercise \label{ex:ensembles-mars} Like decision trees, MARS models are unstable predictors that could potentially benefit from procedures like bagging. Explore this idea using the Ames housing data. Does bagging appear to improve the performance of a single MARS model? What parameter settings for the MARS model seem to have an impact on the performance of bagging?
+%   
+%   \Exercise Modify the \code{Adaboost()} function to incorporate subsampling, like in bagging. Using the email spam example, experiment with sampling both with and without replacement. Does subsampling in Adaboost.M1 seem to offer any advantages or improvements in the email spam example? Discuss your findings.
+% 
+% \end{ExerciseList}

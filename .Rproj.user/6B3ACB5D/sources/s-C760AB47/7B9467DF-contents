@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Scalable Shapley Explanations in R</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Brandon M. Greenwell" />
+    <meta name="date" content="2021-09-16" />
+    <script src="libs/header-attrs/header-attrs.js"></script>
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+    <link rel="stylesheet" href="custom.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Scalable Shapley Explanations in R
+## An introduction to the fastshap package
+### Brandon M. Greenwell
+### 84.51/University of Cincinnati
+### 2021-09-16
+
+---
+
+
+background-image: url(https://upload.wikimedia.org/wikipedia/commons/b/be/Sharingan_triple.svg)
+
+
+
+???
+
+Image credit: [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Sharingan_triple.svg)
+
+---
+
+# Explaining individual predictions
+
+* While discovering which features have the biggest *overall* impact on the model, it is often more informative to determine:
+
+  1. .MediumSeaGreen[Which features impacted a specific prediction (or set up predictions)?]
+  
+  2. .MediumSeaGreen[How did each feature impact a specific prediction (or set up predictions)?]
+  
+* We can think of this as *local variable importance* (or *case-wise variable importance*)
+
+  - More generally referred to as *prediction explanations*
+  
+* Similar to reason codes, but in raw form
+  
+* Many different flavors, but we'll focus mainly on (arguably) the most important: .dodgerblue[*Shapley explanations*]
+
+
+---
+
+# Shapley explanations
+
+* Conveys how each feature value contributed to a prediction
+
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* 😱
+
+* Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
+
+* The only prediction explanation method to satisfy several useful properties of *fairness*
+
+  1. Local accuracy (efficiency)
+  2. Missingness
+  3. Consistency (monotonicity)
+
+
+---
+
+# So what's a Shapley value?
+
+The Shapley value is the average marginal contribution of a .blue[*player*] across all possible .blue[*coalitions*] in a .blue[*game*] 
+
+`$$\phi_i\left(x\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$`
+
+--
+
+.pull-left[
+
+&lt;img src="https://media.giphy.com/media/kaq6GnxDlJaBq/source.gif" style="width: 80%" /&gt;
+
+]
+
+.pull-right[
+
+.center.font150.tomato[WTF does that mean?]
+
+.font90[
+In the context of ML:
+
+* .blue[**Game**] = prediction task for a single observation `\(x\)`
+* .blue[**Gain**] = prediction for `\(x\)` minus the average prediction for all training observations
+* .blue[**Players**] = the feature values of `\(x\)` that collaborate to receive the gain (i.e., predict a certain value)
+]
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-alex-brad-brandon.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+Alex, Brad, and Brandon decide to go out for drinks after work. We shared a few pitchers of 🍺, but nobody payed attention to how much each person drank.
+
+.font150.purple[What's a *fair* way to split the tab?]
+
+]
+  
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-alex.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+If Alex drank alone, he'd only pay $10
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-brad.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+  
+If Brad drank alone, he'd only pay $20
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-brandon.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+If Brandon drank alone, he'd only pay $10
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-alex-brad.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+If Alex and Brad drank together, they'd only pay $25
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-alex-brandon.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+If Alex and Brandon drank together, they'd only pay $15
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-brad-brandon.png" style="width: 100%" /&gt;
+
+]
+
+.pull-right[
+
+If Brad and Brandon drank together, they'd only pay $13
+
+]
+
+
+---
+class: middle
+
+## A simple example 🍻
+
+.pull-left[
+
+&lt;img src="images/moes-scenario-matrix.png" style="width: 100%" /&gt;
+
+]
+
+--
+
+.pull-right[
+
+&lt;img src="images/moes-payoff-matrix.png" style="width: 100%" /&gt;
+
+]
+
+
+---
+
+# Shapley explanations
+
+.blue[**For the programmers**], implementing approximate Shapley explanations is rather straightforward:
+
+.center[
+&lt;img src="images/shapley-algorithm.png" style="width: 70%" class="center" /&gt;
+]
+
+**Interpretation:** .purple[A Shapley explanation gives the contribution of a feature value to the difference between the actual prediction and the mean prediction] (averaged over all the training data).
+
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="libs/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_HTMLorMML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

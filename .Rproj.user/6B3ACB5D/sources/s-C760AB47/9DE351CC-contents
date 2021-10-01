@@ -1,0 +1,42 @@
+library(fastshap)
+library(ggplot2)
+library(isotree)
+
+
+# Read in Ames housing data and split into train/test sets using a 70/30 split
+t3 <- read.csv("https://hbiostat.org/data/repo/titanic3.csv",
+               stringsAsFactors = TRUE)
+keep <- c("survived", "pclass", "age", "sex", "sibsp", "parch")
+t3 <- t3[, keep]  # only retain key variables
+
+
+# Fit a default isolation forest
+t3.ifo <- isolation.forest(t3, nthreads = 1, random_seed = 2223)
+
+# Compute anomaly scores for the test observations
+head(scores <- predict(t3.ifo, newdata = t3))
+
+# Prediction wrapper that tells fastshap how to obtain prediction from our
+# fitted model
+# pfun <- function(object, newdata) {
+#   predict(object, data = newdata)$predictions
+# }
+
+max.id <- which.max(scores)  # row ID for max anomaly score
+(max.x <- t3[max.id, ])
+max(scores)
+
+pfun <- function(object, newdata) {  # prediction wrapper
+  predict(object, newdata = newdata)
+}
+
+# Generate feature contributions
+set.seed(1351)  # for reproducibility
+(ex <- explain(t3.ifo, X = t3, newdata = max.x, 
+               pred_wrapper = pfun, adjust = TRUE, 
+               nsim = 1000))
+sum(ex)  # should sum to f(x) - baseline whenever `adjust = TRUE` 
+
+pfun(t3.ifo, newdata = max.x) - mean(pfun(t3.ifo, newdata = t3))
+
+autoplot(ex, type = "contribution", feature_values = max.x)

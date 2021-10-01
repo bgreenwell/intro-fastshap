@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="" xml:lang="">
+  <head>
+    <title>Scalable Shapley Explanations in R</title>
+    <meta charset="utf-8" />
+    <meta name="author" content="Brandon M. Greenwell" />
+    <meta name="date" content="2021-10-01" />
+    <script src="libs/header-attrs-2.10/header-attrs.js"></script>
+    <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
+    <link href="libs/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
+    <link rel="stylesheet" href="custom.css" type="text/css" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Scalable Shapley Explanations in R
+## An introduction to the fastshap package
+### Brandon M. Greenwell
+### 84.51/University of Cincinnati
+### 2021-10-01
+
+---
+
+
+## Shameless plug...📚
+
+&lt;img src="images/books.png" width="1389" /&gt;
+
+
+
+
+---
+
+
+## Explaining individual predictions
+
+* While discovering which features have the biggest *overall* impact on the model is important, it is often more informative to determine:
+
+  .center.MediumSeaGreen[Which features impacted a specific set of predictions, and how?]
+
+* We can think of this as *local* (or *case-wise*) *variable importance*
+
+  - More generally referred to as *prediction explanations* or *feature contributions*  
+  
+* Many different flavors, but we'll focus on (arguably) the most popular: .dodgerblue[*Shapley explanations*]
+
+--
+
+For an arbitrary observation `\(\boldsymbol{x}_0\)`, Shapley values provide a measure of each feature values contribution to the difference
+
+`$$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$`
+
+
+---
+
+## Shapley explanations
+
+* Conveys how each features value contributed to prediction - *baseline* (or model performance)
+
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* 😱
+
+* Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
+
+* The only prediction explanation method to satisfy several useful properties of .dodgerblue[*fairness*]:
+
+  1. Local accuracy (efficiency)
+  2. Missingness
+  3. Consistency (monotonicity)
+
+
+---
+
+## So, what's a Shapley value?
+
+The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .MediumSeaGreen[*game*]:
+
+`$$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$`
+
+--
+
+.pull-left[
+
+&lt;img src="https://media.giphy.com/media/3o6MbbwX2g2GA4MUus/giphy.gif?cid=ecf05e471n8c85mbtirkm0ra4x4qa8ezo2idws6ag4f2rvtw&amp;rid=giphy.gif&amp;ct=g" style="width: 80%" /&gt;
+
+]
+
+.pull-right[
+
+.font90[
+In the context of predictive modeling:
+
+* .forestgreen[**Game**] = prediction task for a single observation `\(\boldsymbol{x}_0\)`
+* .forestgreen[**Gain**] = prediction for `\(\boldsymbol{x}_0\)` minus the average prediction for all training observations
+* .forestgreen[**Players**] = the feature values of `\(\boldsymbol{x}_0\)` that collaborate to receive the gain (i.e., predict a certain value)
+
+]
+
+]
+
+
+&lt;!-- --- --&gt;
+&lt;!-- class: middle --&gt;
+
+&lt;!-- ## A simple example 🍻 --&gt;
+
+&lt;!-- .pull-left[ --&gt;
+
+&lt;!-- &lt;img src="images/moes-scenario-matrix.png" style="width: 80%" /&gt; --&gt;
+
+&lt;!-- ] --&gt;
+
+&lt;!-- .pull-right[ --&gt;
+
+&lt;!-- &lt;img src="images/moes-payoff-matrix.png" style="width: 100%" /&gt; --&gt;
+
+&lt;!-- ] --&gt;
+
+
+---
+
+## Approximating Shapley values
+
+.purple[**For the programmers**], implementing approximate Shapley explanations is rather straightforward [(Strumbelj et al., 2014)](https://dl.acm.org/doi/10.1007/s10115-013-0679-x):
+
+.center[
+&lt;img src="images/shapley-algorithm.png" style="width: 100%" class="center" /&gt;
+]
+
+
+---
+class: middle
+
+A poor-man's implementation in R...
+
+
+```r
+sample.shap &lt;- function(f, obj, R, x, feature, X) {
+  phi &lt;- numeric(R)  # to store Shapley values
+  N &lt;- nrow(X)  # sample size
+  p &lt;- ncol(X)  # number of features
+  b1 &lt;- b2 &lt;- x
+  for (m in seq_len(R)) {
+*   w &lt;- X[sample(N, size = 1), ]  # randomly drawn instance
+*   ord &lt;- sample(names(w))  # random permutation of features
+*   swap &lt;- ord[seq_len(which(ord == feature) - 1)]
+*   b1[swap] &lt;- w[swap]
+*   b2[c(swap, feature)] &lt;- w[c(swap, feature)]
+*   phi[m] &lt;- f(obj, newdata = b1) - f(obj, newdata = b2)
+  }
+  mean(phi)
+}
+```
+
+
+---
+class: middle
+
+## Enter...**fastshap**
+
+* Explaining `\(N\)` instances with `\(p\)` features would require `\(2 \times m \times N \times p\)` calls to `\(\hat{f}\left(\boldsymbol{b}_1\right) - \hat{f}\left(\boldsymbol{b}_2\right)\)` 
+* [fastshap](https://cran.r-project.org/package=fastshap) reduces this to `\(2 \times m \times p\)`
+
+  - Trick here is to generate all the "Frankenstein instances" up front, and score the differences once: `\(\hat{f}\left(\boldsymbol{B}_1\right) - \hat{f}\left(\boldsymbol{B}_2\right)\)`
+  
+      * Logical subsetting! (http://adv-r.had.co.nz/Subsetting.html)
+      
+  - It's also parallelized across predictors
+  
+  - Supports Tree SHAP implementation in [xgboost](https://cran.r-project.org/package=xgboost) and [lightgbm](https://cran.r-project.org/package=lightgbm) packages (woot!)
+
+
+---
+class: middle
+
+## Simple benchmark
+
+Explaining a single observation from a [ranger](https://cran.r-project.org/web/packages/ranger/index.html)-based random forest fit to the well-known [titanic](https://cran.r-project.org/package=titanic) data set.
+
+&lt;img src="slides_files/figure-html/unnamed-chunk-1-1.svg" width="90%" style="display: block; margin: auto;" /&gt;
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+
+```r
+library(ggplot2)
+library(ranger)
+library(fastshap)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# Read in the data and clean it up a bit
+titanic &lt;- titanic::titanic_train
+features &lt;- c(
+  "Survived",  # passenger survival indicator
+  "Pclass",    # passenger class
+  "Sex",       # gender
+  "Age",       # age
+  "SibSp",     # number of siblings/spouses aboard
+  "Parch",     # number of parents/children aboard
+  "Fare",      # passenger fare
+  "Embarked"   # port of embarkation
+)
+titanic &lt;- titanic[, features]
+titanic$Survived &lt;- as.factor(titanic$Survived)
+titanic &lt;- na.omit(titanic)  # ...umm?
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+
+```r
+# Fit a (default) random forest
+set.seed(1046)  # for reproducibility
+rfo &lt;- ranger(Survived ~ ., data = titanic, probability = TRUE)
+
+# Prediction wrapper for `fastshap::explain()`; has to return a 
+# single (atomic) vector of predictions
+pfun &lt;- function(object, newdata) {  # computes prob(Survived=1|x)
+  predict(object, data = newdata)$predictions[, 2]
+}
+
+# Estimate feature contributions for each imputed training set
+X &lt;- subset(titanic, select = -Survived)  # features only!
+set.seed(1051)
+(ex.all &lt;- 
+*  explain(rfo, X = X, nsim = 100, adjust = TRUE,
+*          pred_wrapper = pfun))
+```
+
+```
+## # A tibble: 714 x 7
+##     Pclass     Sex      Age    SibSp     Parch     Fare Embarked
+##      &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+##  1 -0.0431 -0.184  -0.00469  0.0140  -0.0121   -0.0301  -0.0181 
+##  2  0.170   0.270  -0.0114   0.00204  0.00164   0.114    0.0378 
+##  3 -0.122   0.230   0.0226   0.0209  -0.00687  -0.0258  -0.0172 
+##  4  0.156   0.288   0.0106  -0.00589  0.00361   0.123   -0.00997
+##  5 -0.0413 -0.157  -0.0320   0.0141  -0.00523  -0.0710  -0.00295
+##  6  0.0550 -0.197  -0.117   -0.00330 -0.00210   0.0704  -0.0103 
+##  7 -0.0857 -0.0972  0.220   -0.157    0.0182   -0.0709  -0.00627
+##  8 -0.113   0.264   0.0518   0.0318   0.0575    0.0294  -0.00218
+##  9  0.0796  0.323   0.0406  -0.00369 -0.000850  0.00905  0.0520 
+## 10 -0.110   0.140   0.239   -0.00889  0.0389    0.0482  -0.00439
+## # ... with 704 more rows
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+
+```r
+p1 &lt;- autoplot(ex.all)
+p2 &lt;- autoplot(ex.all, type = "dependence", feature = "Age", X = X,
+               color_by = "Sex", alpha = 0.5) + theme(legend.position = c(0.8, 0.8))
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+&lt;img src="slides_files/figure-html/titanic-shap-all-plots-1.svg" width="80%" style="display: block; margin: auto;" /&gt;
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+Explaining an individual row (i.e., passenger); inspiration for this example taken from [here](https://modeloriented.github.io/iBreakDown/articles/vignette_iBreakDown_titanic.html).
+
+.pull-left[
+.scrollable.code70[
+
+```r
+# Explain an individual passenger
+jack.dawson &lt;- data.frame(
+  # Survived = factor(0, levels = 0:1),  # in case you haven't seen the movie
+  Pclass = 3,
+  Sex = factor("male", levels = c("female", "male")),
+  Age = 20,
+  SibSp = 0,
+  Parch = 0,
+  Fare = 15,  # lower end of third-class ticket prices
+  Embarked = factor("S", levels = c("", "C", "Q", "S"))
+)
+```
+]
+
+]
+.pull-right[
+
+&lt;img src="images/jack.jpg" width="100%" style="display: block; margin: auto;" /&gt;
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+.scrollable.code70[
+
+```r
+(pred.jack &lt;- pfun(rfo, newdata = jack.dawson))
+```
+
+```
+##          1 
+## 0.08742743
+```
+
+```r
+(baseline &lt;- mean(pfun(rfo, newdata = X)))
+```
+
+```
+## [1] 0.406058
+```
+
+```r
+# Estimate feature contributions for Jack's predicted probability
+set.seed(754)
+(ex.jack &lt;- 
+    explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
+          adjust = TRUE, pred_wrapper = pfun))
+```
+
+```
+## # A tibble: 1 x 7
+##    Pclass    Sex     Age  SibSp   Parch    Fare Embarked
+##     &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;  &lt;dbl&gt;   &lt;dbl&gt;   &lt;dbl&gt;    &lt;dbl&gt;
+## 1 -0.0675 -0.144 -0.0331 0.0101 -0.0156 -0.0490  -0.0192
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding survival on the Titanic
+
+&lt;img src="slides_files/figure-html/titanic-jack-ex-plot-1.svg" width="100%" style="display: block; margin: auto;" /&gt;
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+
+```r
+library(fastshap)
+library(ggplot2)
+library(isotree)
+
+# Set ggplot2 theme
+theme_set(theme_bw())
+
+# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
+
+# Read in credit card fraud data
+ccfraud &lt;- data.table::fread("data/ccfraud.csv")
+
+# Randomize the data
+set.seed(2117)  # for reproducibility
+ccfraud &lt;- ccfraud[sample(nrow(ccfraud)), ]
+
+# Split data into train/test sets
+set.seed(2013)  # for reproducibility
+trn.id &lt;- sample(nrow(ccfraud), size = 10000, replace = FALSE)
+ccfraud.trn &lt;- ccfraud[trn.id, ]
+ccfraud.tst &lt;- ccfraud[-trn.id, ]
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+
+```r
+# Fit a default isolation forest (unsupervised)
+ifo &lt;- isolation.forest(ccfraud.trn[, 1L:30L], random_seed = 2223, 
+                        nthreads = 1)
+
+# Compute anomaly scores for the test observations
+head(scores &lt;- predict(ifo, newdata = ccfraud.tst))
+```
+
+```
+## [1] 0.3182065 0.3425736 0.3238238 0.3229748 0.3384741 0.3268937
+```
+]
+
+
+&lt;!-- --- --&gt;
+&lt;!-- class: middle --&gt;
+
+&lt;!-- ### Example: understanding anomalous credit card transactions --&gt;
+
+&lt;!-- ```{r ccfraud-ifo-gain, echo=FALSE} --&gt;
+&lt;!-- # Plot cumulative gain chart --&gt;
+&lt;!-- ord &lt;- order(scores, decreasing = TRUE) --&gt;
+&lt;!-- y &lt;- ccfraud.tst$Class[ord]  # order according to sorted scores --&gt;
+&lt;!-- prop &lt;- seq_along(y) / length(y) --&gt;
+&lt;!-- lift &lt;- cumsum(y) / sum(ccfraud.tst$Class)  # convert to proportion --&gt;
+&lt;!-- ccfraud.lift &lt;- data.frame(prop, lift) --&gt;
+&lt;!-- palette("Okabe-Ito") --&gt;
+&lt;!-- ggplot(ccfraud.lift, aes(prop, lift)) + --&gt;
+&lt;!--   geom_line(color = 2) + --&gt;
+&lt;!--   geom_abline(intercept = 0, slope = 1, linetype = 2, color = 1) + --&gt;
+&lt;!--   scale_x_continuous(breaks = 0:10 / 10) + --&gt;
+&lt;!--   scale_y_continuous(breaks = 0:10 / 10) + --&gt;
+&lt;!--   xlab("Proportion of sample inspected") + --&gt;
+&lt;!--   ylab("Proportion of anomalies identified") --&gt;
+&lt;!-- palette("default") --&gt;
+&lt;!-- ``` --&gt;
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+.scrollable.code70[
+
+```r
+# Find test observations corresponding to maximum anomaly score
+max.id &lt;- which.max(scores)  # row ID for observation wit
+max.x &lt;- ccfraud.tst[max.id, ]
+max(scores)
+```
+
+```
+## [1] 0.8379214
+```
+
+```r
+X &lt;- ccfraud.trn[, 1L:30L]  # feature columns only!
+max.x &lt;- max.x[, 1L:30L]  # feature columns only!
+pfun &lt;- function(object, newdata) {  # prediction wrapper
+  predict(object, newdata = newdata)
+}
+
+# Generate feature contributions
+set.seed(1351)  # for reproducibility
+ex &lt;- explain(ifo, X = X, newdata = max.x, pred_wrapper = pfun, 
+              adjust = TRUE, nsim = 1000)
+
+# Should sum to f(x) - baseline whenever `adjust = TRUE`
+sum(ex)   
+```
+
+```
+## [1] 0.5010727
+```
+]
+
+
+---
+class: middle
+
+### Example: understanding anomalous credit card transactions
+
+&lt;img src="slides_files/figure-html/ccfraud-ifo-ex-plot-1.svg" width="100%" style="display: block; margin: auto;" /&gt;
+
+
+---
+class: middle, center
+
+## Thank you
+
+&lt;img src="https://media.giphy.com/media/3orifiI9P8Uita7ySs/giphy.gif" style="width: 80%" /&gt;
+
+    </textarea>
+<style data-target="print-only">@media screen {.remark-slide-container{display:block;}.remark-slide-scaler{box-shadow:none;}}</style>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function(d) {
+  var s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})(document);
+
+(function(d) {
+  var el = d.getElementsByClassName("remark-slides-area");
+  if (!el) return;
+  var slide, slides = slideshow.getSlides(), els = el[0].children;
+  for (var i = 1; i < slides.length; i++) {
+    slide = slides[i];
+    if (slide.properties.continued === "true" || slide.properties.count === "false") {
+      els[i - 1].className += ' has-continuation';
+    }
+  }
+  var s = d.createElement("style");
+  s.type = "text/css"; s.innerHTML = "@media print { .has-continuation { display: none; } }";
+  d.head.appendChild(s);
+})(document);
+// delete the temporary CSS (for displaying all slides initially) when the user
+// starts to view slides
+(function() {
+  var deleted = false;
+  slideshow.on('beforeShowSlide', function(slide) {
+    if (deleted) return;
+    var sheets = document.styleSheets, node;
+    for (var i = 0; i < sheets.length; i++) {
+      node = sheets[i].ownerNode;
+      if (node.dataset["target"] !== "print-only") continue;
+      node.parentNode.removeChild(node);
+    }
+    deleted = true;
+  });
+})();
+(function() {
+  "use strict"
+  // Replace <script> tags in slides area to make them executable
+  var scripts = document.querySelectorAll(
+    '.remark-slides-area .remark-slide-container script'
+  );
+  if (!scripts.length) return;
+  for (var i = 0; i < scripts.length; i++) {
+    var s = document.createElement('script');
+    var code = document.createTextNode(scripts[i].textContent);
+    s.appendChild(code);
+    var scriptAttrs = scripts[i].attributes;
+    for (var j = 0; j < scriptAttrs.length; j++) {
+      s.setAttribute(scriptAttrs[j].name, scriptAttrs[j].value);
+    }
+    scripts[i].parentElement.replaceChild(s, scripts[i]);
+  }
+})();
+(function() {
+  var links = document.getElementsByTagName('a');
+  for (var i = 0; i < links.length; i++) {
+    if (/^(https?:)?\/\//.test(links[i].getAttribute('href'))) {
+      links[i].target = '_blank';
+    }
+  }
+})();
+// adds .remark-code-has-line-highlighted class to <pre> parent elements
+// of code chunks containing highlighted lines with class .remark-code-line-highlighted
+(function(d) {
+  const hlines = d.querySelectorAll('.remark-code-line-highlighted');
+  const preParents = [];
+  const findPreParent = function(line, p = 0) {
+    if (p > 1) return null; // traverse up no further than grandparent
+    const el = line.parentElement;
+    return el.tagName === "PRE" ? el : findPreParent(el, ++p);
+  };
+
+  for (let line of hlines) {
+    let pre = findPreParent(line);
+    if (pre && !preParents.includes(pre)) preParents.push(pre);
+  }
+  preParents.forEach(p => p.classList.add("remark-code-has-line-highlighted"));
+})(document);</script>
+
+<script>
+slideshow._releaseMath = function(el) {
+  var i, text, code, codes = el.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+};
+slideshow._releaseMath(document);
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

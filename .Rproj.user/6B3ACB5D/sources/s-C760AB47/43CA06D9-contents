@@ -1,0 +1,54 @@
+shapley <- function(nsim, obs, feature, X, f) {
+  res <- numeric(nsim)
+  n <- nrow(X)
+  p <- ncol(X)
+  x <- xpj <- xmj <- X[obs, ]
+  for (m in seq_len(nsim)) {
+    z <- X[sample(n, size = 1), ]
+    ord <- sample(names(z))
+    swap <- ord[seq_len(which(ord == feature) - 1)]
+    xpj[swap] <- z[swap]
+    xmj[c(swap, feature)] <- z[c(swap, feature)]
+    res[m] <- predict(f, newdata = t(xpj)) - 
+      predict(f, newdata = t(xmj))
+  }
+  mean(res)
+}
+
+
+# Load required packages
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+library(pdp)
+
+# Fit a random forest to the Boston housing data
+set.seed(101)
+boston$chas <- as.integer(boston$chas)
+X <- data.matrix(subset(boston, select = -cmedv))
+y <- boston$cmedv
+rfo <- randomForest(cmedv ~ ., data = boston)
+
+# Compute (approximate) SHAP values for rm
+shap <- numeric(nrow(X))
+for (i in seq_len(nrow(X))) {
+  message("i = ", i)
+  shap[i] <- shapley(nsim = 10, obs = i, feature = "rm", X = X, f = rfo)
+}
+
+# SHAP dependence plot
+boston %>%
+  mutate(shap_rm = shap) %>%
+  ggplot(aes(x = rm, y = shap_rm, color = cmedv)) +
+  geom_point() +
+  scale_colour_viridis_c(name = "Feature\nvalue", option = "C") +
+  xlab("Average number of rooms per dwelling") +
+  ylab("SHAP contribution") +
+  theme_light()
+
+rbind(
+  "iBreakDown" = coef(lm(iBreakDown ~ nsim + 1, data = res)),
+  "iml" = coef(lm(iml ~ nsim + 1, data = res)),
+  "fastshap" = coef(lm(fastshap ~ nsim + 1, data = res))
+)
+
