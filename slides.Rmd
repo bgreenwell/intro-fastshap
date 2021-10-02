@@ -2,7 +2,7 @@
 title: "Scalable Shapley Explanations in R"
 subtitle: "An introduction to the fastshap package\n https://bgreenwell.github.io/intro-fastshap/slides.html"
 author: "Brandon M. Greenwell"
-institute: "84.51/University of Cincinnati"
+institute: "84.51\u00b0/WSU/UC"
 date: "`r Sys.Date()`"
 output:
   xaringan::moon_reader:
@@ -361,7 +361,7 @@ library(isotree)
 # Set ggplot2 theme
 theme_set(theme_bw())
 
-# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
+# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud  #<<
 
 # Read in credit card fraud data
 ccfraud <- data.table::fread("data/ccfraud.csv")
@@ -448,6 +448,22 @@ ladd(panel.text(0.375, 8, labels = "baseline", col = 1))
 palette("default")
 ```
 
+
+---
+
+## Good resources
+
+* [Interpretable Machine Learning: A Guide for Making Black Box Models Explainable](https://christophm.github.io/interpretable-ml-book/)
+  
+  - Christoph Molnar is also the creator of the well-known [iml package](https://cran.r-project.org/package=iml)
+  
+* In-progress [article](https://github.com/bgreenwell/rjournal-shapley) on Shapley explanations for [*The R Journal*](https://journal.r-project.org/)
+
+  - Consider contributing `r emo::ji("smile")`
+  
+* [Explanatory Model Analysis: Explore, Explain, and Examine Predictive Models. With examples in R and Python](https://ema.drwhy.ai/)
+
+  - Authors associated with the [DALEX](https://github.com/ModelOriented/DALEX) ecosystem for IML
 
 ---
 class: middle, center

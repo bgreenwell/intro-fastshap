@@ -4,7 +4,7 @@
     <title>Scalable Shapley Explanations in R</title>
     <meta charset="utf-8" />
     <meta name="author" content="Brandon M. Greenwell" />
-    <meta name="date" content="2021-10-01" />
+    <meta name="date" content="2021-10-02" />
     <script src="libs/header-attrs-2.10/header-attrs.js"></script>
     <link href="libs/remark-css-0.0.1/default.css" rel="stylesheet" />
     <link href="libs/remark-css-0.0.1/default-fonts.css" rel="stylesheet" />
@@ -17,8 +17,8 @@ class: center, middle, inverse, title-slide
 # Scalable Shapley Explanations in R
 ## An introduction to the fastshap package <a href="https://bgreenwell.github.io/intro-fastshap/slides.html" class="uri">https://bgreenwell.github.io/intro-fastshap/slides.html</a>
 ### Brandon M. Greenwell
-### 84.51/University of Cincinnati
-### 2021-10-01
+### 84.51°/WSU/UC
+### 2021-10-02
 
 ---
 
@@ -347,7 +347,7 @@ library(isotree)
 # Set ggplot2 theme
 theme_set(theme_bw())
 
-# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
+*# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
 
 # Read in credit card fraud data
 ccfraud &lt;- data.table::fread("data/ccfraud.csv")
@@ -434,6 +434,22 @@ class: middle
 
 &lt;img src="slides_files/figure-html/ccfraud-ifo-ex-plot-1.svg" width="100%" style="display: block; margin: auto;" /&gt;
 
+
+---
+
+## Good resources
+
+* [Interpretable Machine Learning: A Guide for Making Black Box Models Explainable](https://christophm.github.io/interpretable-ml-book/)
+  
+  - Christoph Molnar is also the creator of the well-known [iml package](https://cran.r-project.org/package=iml)
+  
+* In-progress [article](https://github.com/bgreenwell/rjournal-shapley) on Shapley explanations for [*The R Journal*](https://journal.r-project.org/)
+
+  - Consider contributing 😄
+  
+* [Explanatory Model Analysis: Explore, Explain, and Examine Predictive Models. With examples in R and Python](https://ema.drwhy.ai/)
+
+  - Authors associated with the [DALEX](https://github.com/ModelOriented/DALEX) ecosystem for IML
 
 ---
 class: middle, center
