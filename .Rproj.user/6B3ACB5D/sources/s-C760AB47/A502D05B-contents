@@ -89,7 +89,9 @@ $$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol
 
 ## So, what's a Shapley value?
 
-The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .MediumSeaGreen[*game*]:
+The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*]:
+
+--
 
 $$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$
 
@@ -106,9 +108,9 @@ $$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)}
 .font90[
 In the context of predictive modeling:
 
-* .forestgreen[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
-* .forestgreen[**Gain**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations
-* .forestgreen[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the gain (i.e., predict a certain value)
+* .purple[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
+* .purple[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the gain (i.e., predict a certain value)
+* .purple[**Gain**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations
 
 ]
 
