@@ -117,9 +117,9 @@ $$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)}
 .font90[
 In the context of predictive modeling:
 
-* .purple[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
-* .purple[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the *gain*
-* .purple[**Gain**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations
+* .dodgerblue[**Game**] = prediction task for a single observation $\boldsymbol{x}_0$
+* .dodgerblue[**Players**] = the feature values of $\boldsymbol{x}_0$ that collaborate to receive the *gain* or *payout*
+* .dodgerblue[**Payout**] = prediction for $\boldsymbol{x}_0$ minus the average prediction for all training observations (i.e., baseline)
 
 ]
 
