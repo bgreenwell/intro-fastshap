@@ -45,19 +45,15 @@ class: center, middle, inverse, title-slide
   
 * Many different flavors, but we'll focus on (arguably) the most popular: .dodgerblue[*Shapley explanations*]
 
---
-
-For an arbitrary observation `\(\boldsymbol{x}_0\)`, Shapley values provide a measure of each feature values contribution to the difference
-
-`$$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$`
 
 
 ---
 
 ## Shapley explanations
 
-* Conveys how each features value contributed to prediction - *baseline* (or model performance)
+For an arbitrary observation `\(\boldsymbol{x}_0\)`, Shapley values provide a measure of each feature values contribution to the difference
 
+`$$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$`
 * Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* 😱
 
 * Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
@@ -97,24 +93,6 @@ In the context of predictive modeling:
 ]
 
 ]
-
-
-&lt;!-- --- --&gt;
-&lt;!-- class: middle --&gt;
-
-&lt;!-- ## A simple example 🍻 --&gt;
-
-&lt;!-- .pull-left[ --&gt;
-
-&lt;!-- &lt;img src="images/moes-scenario-matrix.png" style="width: 80%" /&gt; --&gt;
-
-&lt;!-- ] --&gt;
-
-&lt;!-- .pull-right[ --&gt;
-
-&lt;!-- &lt;img src="images/moes-payoff-matrix.png" style="width: 100%" /&gt; --&gt;
-
-&lt;!-- ] --&gt;
 
 
 ---
@@ -158,16 +136,16 @@ class: middle
 
 ## Enter...**fastshap**
 
-* Explaining `\(N\)` instances with `\(p\)` features would require `\(2 \times m \times N \times p\)` calls to `\(\hat{f}\left(\boldsymbol{b}_1\right) - \hat{f}\left(\boldsymbol{b}_2\right)\)` 
+* Explaining `\(N\)` instances with `\(p\)` features would require `\(2 \times m \times N \times p\)` calls to `\(\hat{f}\left(\right)\)` 
 * [fastshap](https://cran.r-project.org/package=fastshap) reduces this to `\(2 \times m \times p\)`
 
   - Trick here is to generate all the "Frankenstein instances" up front, and score the differences once: `\(\hat{f}\left(\boldsymbol{B}_1\right) - \hat{f}\left(\boldsymbol{B}_2\right)\)`
   
       * Logical subsetting! (http://adv-r.had.co.nz/Subsetting.html)
       
-  - It's also parallelized across predictors
+  - It's also parallelized across predictors (not by default)
   
-  - Supports Tree SHAP implementation in [xgboost](https://cran.r-project.org/package=xgboost) and [lightgbm](https://cran.r-project.org/package=lightgbm) packages (woot!)
+  - Supports Tree SHAP implementations in both the [xgboost](https://cran.r-project.org/package=xgboost) and [lightgbm](https://cran.r-project.org/package=lightgbm) packages (woot!)
 
 
 ---
@@ -233,10 +211,8 @@ pfun &lt;- function(object, newdata) {  # computes prob(Survived=1|x)
 
 # Estimate feature contributions for each imputed training set
 X &lt;- subset(titanic, select = -Survived)  # features only!
-set.seed(1051)
-(ex.all &lt;- 
-*  explain(rfo, X = X, nsim = 100, adjust = TRUE,
-*          pred_wrapper = pfun))
+set.seed(1051)  # for reproducibility
+*(ex.all &lt;- explain(rfo, X = X, nsim = 100, adjust = TRUE,  pred_wrapper = pfun))
 ```
 
 ```
@@ -334,10 +310,9 @@ class: middle
 
 ```r
 # Estimate feature contributions for Jack's predicted probability
-set.seed(754)
-(ex.jack &lt;- 
-    explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
-          adjust = TRUE, pred_wrapper = pfun))
+set.seed(754)  # for reproducibility
+(ex.jack &lt;- explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
+                    adjust = TRUE, pred_wrapper = pfun))
 ```
 
 ```
@@ -410,30 +385,6 @@ head(scores &lt;- predict(ifo, newdata = ccfraud.tst))
 ## [1] 0.3182065 0.3425736 0.3238238 0.3229748 0.3384741 0.3268937
 ```
 ]
-
-
-&lt;!-- --- --&gt;
-&lt;!-- class: middle --&gt;
-
-&lt;!-- ### Example: understanding anomalous credit card transactions --&gt;
-
-&lt;!-- ```{r ccfraud-ifo-gain, echo=FALSE} --&gt;
-&lt;!-- # Plot cumulative gain chart --&gt;
-&lt;!-- ord &lt;- order(scores, decreasing = TRUE) --&gt;
-&lt;!-- y &lt;- ccfraud.tst$Class[ord]  # order according to sorted scores --&gt;
-&lt;!-- prop &lt;- seq_along(y) / length(y) --&gt;
-&lt;!-- lift &lt;- cumsum(y) / sum(ccfraud.tst$Class)  # convert to proportion --&gt;
-&lt;!-- ccfraud.lift &lt;- data.frame(prop, lift) --&gt;
-&lt;!-- palette("Okabe-Ito") --&gt;
-&lt;!-- ggplot(ccfraud.lift, aes(prop, lift)) + --&gt;
-&lt;!--   geom_line(color = 2) + --&gt;
-&lt;!--   geom_abline(intercept = 0, slope = 1, linetype = 2, color = 1) + --&gt;
-&lt;!--   scale_x_continuous(breaks = 0:10 / 10) + --&gt;
-&lt;!--   scale_y_continuous(breaks = 0:10 / 10) + --&gt;
-&lt;!--   xlab("Proportion of sample inspected") + --&gt;
-&lt;!--   ylab("Proportion of anomalies identified") --&gt;
-&lt;!-- palette("default") --&gt;
-&lt;!-- ``` --&gt;
 
 
 ---
