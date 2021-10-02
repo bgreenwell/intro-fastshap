@@ -16,10 +16,19 @@ output:
 
 ## Shameless plug...`r emo::ji("books")`
 
-```{r book1, echo=FALSE}
+.pull-left[
+```{r books, echo=FALSE, out.width="100%"}
 knitr::include_graphics("images/books.png")
 ```
+]
 
+--
+
+.pull-right[
+```{r book1, echo=FALSE}
+knitr::include_graphics("images/ollie.jpg")
+```
+]
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -89,9 +98,9 @@ $$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol
 
 ## So, what's a Shapley value?
 
-The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*]:
-
 --
+
+In .forestgreen[*cooperative game theory*], the Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*] [(Shapley, 1951)](https://www.rand.org/content/dam/rand/pubs/research_memoranda/2008/RM670.pdf):
 
 $$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$
 

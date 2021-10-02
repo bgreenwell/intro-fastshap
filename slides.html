@@ -25,8 +25,15 @@ class: center, middle, inverse, title-slide
 
 ## Shameless plug...📚
 
-&lt;img src="images/books.png" width="1389" /&gt;
+.pull-left[
+&lt;img src="images/books.png" width="100%" /&gt;
+]
 
+--
+
+.pull-right[
+&lt;img src="images/ollie.jpg" width="4032" /&gt;
+]
 
 
 
@@ -69,9 +76,9 @@ For an arbitrary observation `\(\boldsymbol{x}_0\)`, Shapley values provide a me
 
 ## So, what's a Shapley value?
 
-The Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*]:
-
 --
+
+In .forestgreen[*cooperative game theory*], the Shapley value is the average marginal contribution of a .forestgreen[*player*] across all possible .forestgreen[*coalitions*] in a .forestgreen[*game*] [(Shapley, 1951)](https://www.rand.org/content/dam/rand/pubs/research_memoranda/2008/RM670.pdf):
 
 `$$\phi_i\left(val\right) = \frac{1}{p!} \sum_{\mathcal{O} \in \pi\left(p\right)} \left[\Delta Pre^i\left(\mathcal{O}\right) \cup \left\{i\right\} - Pre^i\left(\mathcal{O}\right)\right], \quad i = 1, 2, \dots, p$$`
 
