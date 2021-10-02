@@ -3,7 +3,7 @@ title: "Scalable Shapley Explanations in R"
 subtitle: "An introduction to the fastshap package\n https://bgreenwell.github.io/intro-fastshap/slides.html"
 author: "Brandon M. Greenwell"
 institute: "84.51\u00b0/WSU/UC"
-date: "`r Sys.Date()`"
+date: "2021-10-02"
 output:
   xaringan::moon_reader:
     css: ["default", "default-fonts", "custom.css"]
@@ -14,50 +14,19 @@ output:
       countIncrementalSlides: false
 ---
 
-## Shameless plug...`r emo::ji("books")`
+## Shameless plug...📚
 
 .pull-left[
-```{r books, echo=FALSE, out.width="100%"}
-knitr::include_graphics("images/books.png")
-```
+<img src="images/books.png" width="100%" />
 ]
 
 --
 
 .pull-right[
-```{r book1, echo=FALSE}
-knitr::include_graphics("images/ollie.jpg")
-```
+<img src="images/ollie.jpg" width="4032" />
 ]
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  # cache = TRUE,
-  crayon.enabled = TRUE,
-  dev = "svg",     
-  echo = TRUE,
-  error = FALSE,
-  fig.asp = 0.618,
-  fig.width = 6,
-  fig.retina = 3,  
-  out.width = "100%",
-  fig.align = "center",
-  size = "small",
-  message = FALSE,
-  warning = FALSE
-)
 
-# Set global R options
-options(
-  width = 9999,
-  servr.daemon = TRUE
-)
-
-ladd <- function(x, data = NULL, ..., plot = trellis.last.object()) {
-  return(plot + eval(substitute(latticeExtra::layer(foo, data = data, ...), 
-                                list(foo = substitute(x)))))
-}
-```
 
 ---
 
@@ -83,7 +52,7 @@ ladd <- function(x, data = NULL, ..., plot = trellis.last.object()) {
 For an arbitrary observation $\boldsymbol{x}_0$, Shapley values provide a measure of each feature values contribution to the difference
 
 $$\hat{f}\left(\boldsymbol{x}_0\right) - \sum_{i = 1}^N \hat{f}\left(\boldsymbol{x}_i\right)$$
-* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* `r emo::ji("scream")`
+* Based on [Shapley values](https://en.wikipedia.org/wiki/Shapley_value), an idea from *game theory* 😱
 
 * Can be computed for all training rows and aggregated into useful summaries (e.g., variable importance)
 
@@ -142,19 +111,20 @@ class: middle
 
 A poor-man's implementation in R...
 
-```{r pseudo-code, eval=FALSE}
+
+```r
 sample.shap <- function(f, obj, R, x, feature, X) {
   phi <- numeric(R)  # to store Shapley values
   N <- nrow(X)  # sample size
   p <- ncol(X)  # number of features
   b1 <- b2 <- x
   for (m in seq_len(R)) {
-    w <- X[sample(N, size = 1), ]  # randomly drawn instance  #<<
-    ord <- sample(names(w))  # random permutation of features  #<<
-    swap <- ord[seq_len(which(ord == feature) - 1)]  #<<
-    b1[swap] <- w[swap]  #<<
-    b2[c(swap, feature)] <- w[c(swap, feature)]  #<<
-    phi[m] <- f(obj, newdata = b1) - f(obj, newdata = b2)  #<<
+*   w <- X[sample(N, size = 1), ]  # randomly drawn instance
+*   ord <- sample(names(w))  # random permutation of features
+*   swap <- ord[seq_len(which(ord == feature) - 1)]
+*   b1[swap] <- w[swap]
+*   b2[c(swap, feature)] <- w[c(swap, feature)]
+*   phi[m] <- f(obj, newdata = b1) - f(obj, newdata = b2)
   }
   mean(phi)
 }
@@ -185,30 +155,7 @@ class: middle
 
 Explaining a single observation from a [ranger](https://cran.r-project.org/web/packages/ranger/index.html)-based random forest fit to the well-known [titanic](https://cran.r-project.org/package=titanic) data set.
 
-```{r, echo=FALSE, out.width="90%"}
-res <- readRDS("data/benchmark-results.rds")
-
-# Plot results
-par(
-  mar = c(4, 4, 0.1, 0.1),
-  cex.lab = 0.95,
-  cex.axis = 0.8,
-  mgp = c(2, 0.7, 0),
-  tcl = -0.3,
-  las = 1
-)
-palette("Okabe-Ito")
-plot(res$nsim, res$iBreakDown, type = "b", xlab = "Number of Monte Carlo repetitions",
-     ylab = "Time (in seconds)", col = 2,
-     xlim = c(0, max(res$nsim)), ylim = c(0, 10))#ylim = c(0, max(times1, times2, times3)))
-lines(res$nsim, res$iml, type = "b", col = 3)
-lines(res$nsim, res$fastshap, type = "b", col = 4)
-legend("topright", bty = "n",
-       legend = c("iBreakDown", "iml", "fastshap"),
-       lty = 1, pch = 1, col = c(2, 3, 4), inset = 0.02)
-abline(h = 0, lty = 2)
-palette("default")
-```
+<img src="slides_files/figure-html/unnamed-chunk-1-1.svg" width="90%" style="display: block; margin: auto;" />
 
 ---
 class: middle
@@ -216,7 +163,8 @@ class: middle
 ### Example: understanding survival on the Titanic
 
 .scrollable.code70[
-```{r titanic-setup}
+
+```r
 library(ggplot2)
 library(ranger)
 library(fastshap)
@@ -249,7 +197,8 @@ class: middle
 ### Example: understanding survival on the Titanic
 
 .scrollable.code70[
-```{r titanic-rfo, eval=TRUE, cache=TRUE}
+
+```r
 # Fit a (default) random forest
 set.seed(1046)  # for reproducibility
 rfo <- ranger(Survived ~ ., data = titanic, probability = TRUE)
@@ -263,7 +212,24 @@ pfun <- function(object, newdata) {  # computes prob(Survived=1|x)
 # Estimate feature contributions for each imputed training set
 X <- subset(titanic, select = -Survived)  # features only!
 set.seed(1051)  # for reproducibility
-(ex.all <- explain(rfo, X = X, nsim = 100, adjust = TRUE,  pred_wrapper = pfun))  #<<
+*(ex.all <- explain(rfo, X = X, nsim = 100, adjust = TRUE,  pred_wrapper = pfun))
+```
+
+```
+## # A tibble: 714 x 7
+##     Pclass     Sex      Age    SibSp     Parch     Fare Embarked
+##      <dbl>   <dbl>    <dbl>    <dbl>     <dbl>    <dbl>    <dbl>
+##  1 -0.0431 -0.184  -0.00469  0.0140  -0.0121   -0.0301  -0.0181 
+##  2  0.170   0.270  -0.0114   0.00204  0.00164   0.114    0.0378 
+##  3 -0.122   0.230   0.0226   0.0209  -0.00687  -0.0258  -0.0172 
+##  4  0.156   0.288   0.0106  -0.00589  0.00361   0.123   -0.00997
+##  5 -0.0413 -0.157  -0.0320   0.0141  -0.00523  -0.0710  -0.00295
+##  6  0.0550 -0.197  -0.117   -0.00330 -0.00210   0.0704  -0.0103 
+##  7 -0.0857 -0.0972  0.220   -0.157    0.0182   -0.0709  -0.00627
+##  8 -0.113   0.264   0.0518   0.0318   0.0575    0.0294  -0.00218
+##  9  0.0796  0.323   0.0406  -0.00369 -0.000850  0.00905  0.0520 
+## 10 -0.110   0.140   0.239   -0.00889  0.0389    0.0482  -0.00439
+## # ... with 704 more rows
 ```
 ]
 
@@ -274,12 +240,15 @@ class: middle
 ### Example: understanding survival on the Titanic
 
 .scrollable.code70[
-```{r titanic-shap-all-plots, eval=TRUE, cache=TRUE, out.width = "80%"}
+
+```r
 p1 <- autoplot(ex.all)
 p2 <- autoplot(ex.all, type = "dependence", feature = "Age", X = X,
                color_by = "Sex", alpha = 0.5) + theme(legend.position = c(0.8, 0.8))
 gridExtra::grid.arrange(p1, p2, nrow = 1)
 ```
+
+<img src="slides_files/figure-html/titanic-shap-all-plots-1.svg" width="80%" style="display: block; margin: auto;" />
 ]
 
 
@@ -292,7 +261,8 @@ Explaining an individual row (i.e., passenger); inspiration for this example tak
 
 .pull-left[
 .scrollable.code70[
-```{r titanic-jack}
+
+```r
 # Explain an individual passenger
 jack.dawson <- data.frame(
   # Survived = factor(0, levels = 0:1),  # in case you haven't seen the movie
@@ -310,9 +280,7 @@ jack.dawson <- data.frame(
 ]
 .pull-right[
 
-```{r jack, echo=FALSE}
-knitr::include_graphics("images/jack.jpg")
-```
+<img src="images/jack.jpg" width="100%" style="display: block; margin: auto;" />
 ]
 
 
@@ -322,14 +290,36 @@ class: middle
 ### Example: understanding survival on the Titanic
 
 .scrollable.code70[
-```{r titanic-jack-ex}
-(pred.jack <- pfun(rfo, newdata = jack.dawson))
-(baseline <- mean(pfun(rfo, newdata = X)))
 
+```r
+(pred.jack <- pfun(rfo, newdata = jack.dawson))
+```
+
+```
+##          1 
+## 0.08742743
+```
+
+```r
+(baseline <- mean(pfun(rfo, newdata = X)))
+```
+
+```
+## [1] 0.406058
+```
+
+```r
 # Estimate feature contributions for Jack's predicted probability
 set.seed(754)  # for reproducibility
 (ex.jack <- explain(rfo, X = X, newdata = jack.dawson, nsim = 1000, 
                     adjust = TRUE, pred_wrapper = pfun))
+```
+
+```
+## # A tibble: 1 x 7
+##    Pclass    Sex     Age  SibSp   Parch    Fare Embarked
+##     <dbl>  <dbl>   <dbl>  <dbl>   <dbl>   <dbl>    <dbl>
+## 1 -0.0675 -0.144 -0.0331 0.0101 -0.0156 -0.0490  -0.0192
 ```
 ]
 
@@ -339,23 +329,7 @@ class: middle
 
 ### Example: understanding survival on the Titanic
 
-```{r titanic-jack-ex-plot, echo=FALSE, fig.keep="last"}
-library(waterfall)
-
-res <- data.frame(
-  "feature" = paste0(names(jack.dawson), "=", t(jack.dawson)),
-  "shapley.value" = t(ex.jack)
-)
-palette("Okabe-Ito")
-waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
-               summaryname = "Total: f(x) - baseline", col = 2:3,
-               xlab = "Probability of survival")
-ladd(panel.abline(v = pred.jack, lty = 2, col = 1))
-ladd(panel.abline(v = baseline, lty = 2, col = 1))
-ladd(panel.text(0.105, 4, labels = "f(x)", col = 1))
-ladd(panel.text(0.375, 4, labels = "baseline", col = 1))
-palette("default")
-```
+<img src="slides_files/figure-html/titanic-jack-ex-plot-1.svg" width="100%" style="display: block; margin: auto;" />
 
 
 ---
@@ -364,7 +338,8 @@ class: middle
 ### Example: understanding anomalous credit card transactions
 
 .scrollable.code70[
-```{r ccfraud-setup}
+
+```r
 library(fastshap)
 library(ggplot2)
 library(isotree)
@@ -372,7 +347,7 @@ library(isotree)
 # Set ggplot2 theme
 theme_set(theme_bw())
 
-# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud  #<<
+*# URL: https://www.kaggle.com/mlg-ulb/creditcardfraud
 
 # Read in credit card fraud data
 ccfraud <- data.table::fread("data/ccfraud.csv")
@@ -396,13 +371,18 @@ class: middle
 ### Example: understanding anomalous credit card transactions
 
 .scrollable.code70[
-```{r ccfraud-ifo, cache=TRUE}
+
+```r
 # Fit a default isolation forest (unsupervised)
 ifo <- isolation.forest(ccfraud.trn[, 1L:30L], random_seed = 2223, 
                         nthreads = 1)
 
 # Compute anomaly scores for the test observations
 head(scores <- predict(ifo, newdata = ccfraud.tst))
+```
+
+```
+## [1] 0.3182065 0.3425736 0.3238238 0.3229748 0.3384741 0.3268937
 ```
 ]
 
@@ -413,12 +393,19 @@ class: middle
 ### Example: understanding anomalous credit card transactions
 
 .scrollable.code70[
-```{r ccfraud-ifo-ex, cache=TRUE}
+
+```r
 # Find test observations corresponding to maximum anomaly score
 max.id <- which.max(scores)  # row ID for observation wit
 max.x <- ccfraud.tst[max.id, ]
 max(scores)
+```
 
+```
+## [1] 0.8379214
+```
+
+```r
 X <- ccfraud.trn[, 1L:30L]  # feature columns only!
 max.x <- max.x[, 1L:30L]  # feature columns only!
 pfun <- function(object, newdata) {  # prediction wrapper
@@ -433,6 +420,10 @@ ex <- explain(ifo, X = X, newdata = max.x, pred_wrapper = pfun,
 # Should sum to f(x) - baseline whenever `adjust = TRUE`
 sum(ex)   
 ```
+
+```
+## [1] 0.5010727
+```
 ]
 
 
@@ -441,23 +432,7 @@ class: middle
 
 ### Example: understanding anomalous credit card transactions
 
-```{r ccfraud-ifo-ex-plot, echo=FALSE, fig.width=8, fig.keep="last"}
-res <- data.frame(
-  "feature" = paste0(names(ex), "=", round(t(max.x), digits = 2)),
-  "shapley.value" = as.numeric(as.vector(ex[1L,]))
-)
-pred.max.x <- pfun(ifo, newdata = max.x)
-baseline <- mean(pfun(ifo, newdata = X))
-palette("Okabe-Ito")
-waterfallchart(feature ~ shapley.value, data = res, origin = baseline,
-               summaryname = "Total: f(x) - baseline", col = 2:3,
-               xlab = "Probability of survival")
-ladd(panel.abline(v = pred.max.x, lty = 2, col = 1))
-ladd(panel.abline(v = baseline, lty = 2, col = 1))
-ladd(panel.text(0.8, 8, labels = "f(x)", col = 1))
-ladd(panel.text(0.375, 8, labels = "baseline", col = 1))
-palette("default")
-```
+<img src="slides_files/figure-html/ccfraud-ifo-ex-plot-1.svg" width="100%" style="display: block; margin: auto;" />
 
 
 ---
@@ -470,7 +445,7 @@ palette("default")
   
 * In-progress [article](https://github.com/bgreenwell/rjournal-shapley) on Shapley explanations for [*The R Journal*](https://journal.r-project.org/)
 
-  - Consider contributing `r emo::ji("smile")`
+  - Consider contributing 😄
   
 * [Explanatory Model Analysis: Explore, Explain, and Examine Predictive Models. With examples in R and Python](https://ema.drwhy.ai/)
 
