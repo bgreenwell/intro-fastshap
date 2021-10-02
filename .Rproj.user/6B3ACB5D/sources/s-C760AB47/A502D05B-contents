@@ -14,7 +14,7 @@ output:
       countIncrementalSlides: false
 ---
 
-## Shameless plug...`r emo::ji("books")`
+## Shameless plug...`r emo::ji("package")`/`r emo::ji("books")`
 
 Other IML-related packages: [pdp](https://journal.r-project.org/archive/2017/RJ-2017-016/index.html) and [vip](https://journal.r-project.org/archive/2020/RJ-2020-013/index.html)
 
